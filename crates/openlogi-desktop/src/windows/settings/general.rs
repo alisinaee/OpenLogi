@@ -1,37 +1,93 @@
 //! General settings page.
 
 use super::{
-    App, AppState, Entity, FluentBuilder, IconName, InteractiveElement, ParentElement,
-    SettingField, SettingGroup, SettingItem, SettingPage, SharedString, Slider, SliderState,
-    Styled, ThumbwheelSensitivity, VerticalScrollSensitivity, theme,
+    App, AppState, Entity, FluentBuilder, IconName, IndexPath, InputState, InteractiveElement,
+    IntoElement, ParentElement, SelectItem, SelectState, SettingField, SettingGroup, SettingItem,
+    SettingPage, SharedString, Slider, SliderState, Styled, ThumbwheelSensitivity,
+    VerticalScrollSensitivity, div, h_flex, px, theme,
 };
 use crate::ui::commit_slider::SliderUnit;
+use crate::ui::components::{control_input, control_select};
 use crate::ui::slider_row::SliderRow;
 use crate::ui::theme::FocusRingStyle as _;
 use crate::ui::theme::Typography as _;
 use gpui_base::Button as BaseButton;
 use gpui_component::radio::{Radio, RadioGroup};
-use openlogi_core::config::MouseProfileTarget;
+use openlogi_core::config::{MouseProfileTarget, WheelEasing, WheelFeel};
 
 use crate::features::pointer::momentum::MomentumPanel;
 use crate::platform::registration::ServiceStatus;
 
-/// The page's two sensitivity sliders, named so a call site cannot swap two
-/// same-typed `Entity<SliderState>`s without the compiler noticing.
-pub(super) struct SensitivitySliders {
-    pub(super) vertical_scroll: Entity<SliderState>,
-    pub(super) thumbwheel: Entity<SliderState>,
+/// A slider and the typed-number field that edits the same value.
+pub(super) struct SliderWithEntry {
+    pub(super) slider: Entity<SliderState>,
+    pub(super) entry: Entity<InputState>,
+}
+
+/// The page's scrolling controls, named so a call site cannot swap two
+/// same-typed entities without the compiler noticing.
+pub(super) struct ScrollControls {
+    pub(super) vertical_scroll: SliderWithEntry,
+    pub(super) thumbwheel: SliderWithEntry,
+    pub(super) wheel_duration: SliderWithEntry,
+    pub(super) wheel_easing: Entity<SelectState<Vec<WheelEasingOption>>>,
+}
+
+/// One choice of the smoothed-wheel easing picker.
+#[derive(Clone)]
+pub(super) struct WheelEasingOption {
+    easing: WheelEasing,
+}
+
+impl SelectItem for WheelEasingOption {
+    type Value = WheelEasing;
+
+    fn title(&self) -> SharedString {
+        match self.easing {
+            WheelEasing::Smooth => tr!("pointer.wheel_easing_smooth"),
+            WheelEasing::EaseOut => tr!("pointer.wheel_easing_ease_out"),
+            WheelEasing::Linear => tr!("pointer.wheel_easing_linear"),
+        }
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.easing
+    }
+}
+
+pub(super) fn wheel_easing_options() -> Vec<WheelEasingOption> {
+    [
+        WheelEasing::Smooth,
+        WheelEasing::EaseOut,
+        WheelEasing::Linear,
+    ]
+    .into_iter()
+    .map(|easing| WheelEasingOption { easing })
+    .collect()
+}
+
+pub(super) fn selected_easing_index(
+    current: WheelEasing,
+    options: &[WheelEasingOption],
+) -> IndexPath {
+    let row = options
+        .iter()
+        .position(|option| option.easing == current)
+        .unwrap_or_default();
+    IndexPath::default().row(row)
 }
 
 pub(super) fn general_page(
-    sliders: SensitivitySliders,
+    controls: ScrollControls,
     momentum: Entity<MomentumPanel>,
     registration_status: ServiceStatus,
 ) -> SettingPage {
-    let SensitivitySliders {
+    let ScrollControls {
         vertical_scroll,
         thumbwheel,
-    } = sliders;
+        wheel_duration,
+        wheel_easing,
+    } = controls;
     let group = SettingGroup::new()
         .item(mouse_profile_target_item())
         .item(smooth_scrolling_item())
@@ -41,7 +97,12 @@ pub(super) fn general_page(
             vertical_scroll,
             VerticalScrollSensitivity::MAX,
             VerticalScrollSensitivity::DEFAULT,
-            VerticalScrollSensitivity::scroll_multiplier,
+            |value| {
+                format!(
+                    "{value} ({:.1}\u{d7})",
+                    VerticalScrollSensitivity::scroll_multiplier(value)
+                )
+            },
         ))
         .item(sensitivity_item(
             tr!("pointer.thumb_wheel_sensitivity"),
@@ -49,8 +110,28 @@ pub(super) fn general_page(
             thumbwheel,
             ThumbwheelSensitivity::MAX,
             ThumbwheelSensitivity::DEFAULT,
-            ThumbwheelSensitivity::scroll_multiplier,
+            |value| {
+                format!(
+                    "{value} ({:.1}\u{d7})",
+                    ThumbwheelSensitivity::scroll_multiplier(value)
+                )
+            },
+        ))
+        .item(wheel_easing_item(wheel_easing))
+        .item(sensitivity_item(
+            tr!("pointer.wheel_duration"),
+            tr!("pointer.wheel_duration_description"),
+            wheel_duration,
+            WheelFeel::DURATION_MS_MAX,
+            WheelFeel::DURATION_MS_DEFAULT,
+            |value| format!("{value} ms"),
         ));
+    // Only macOS accelerates the wheel, so only macOS shows the switch.
+    let group = if cfg!(target_os = "macos") {
+        group.item(scroll_acceleration_item())
+    } else {
+        group
+    };
     // Only macOS animates a desktop switch, so only macOS shows the switch.
     // `cfg!` keeps the item and its setter compiled, and used, everywhere.
     let group = if cfg!(target_os = "macos") {
@@ -225,32 +306,73 @@ fn lock_key_notifications_item() -> SettingItem {
     })
 }
 
+/// The switch for macOS acceleration of the smoothed wheel.
+fn scroll_acceleration_item() -> SettingItem {
+    SettingItem::new(
+        tr!("pointer.scroll_acceleration"),
+        SettingField::switch(
+            |cx| AppState::try_read(cx).is_none_or(|s| s.app_settings().scroll_acceleration),
+            |enabled, cx| {
+                AppState::apply(cx, |state| state.commit_scroll_acceleration(enabled));
+            },
+        ),
+    )
+    .description(tr!("pointer.scroll_acceleration_description"))
+}
+
+/// The picker for the curve of a smoothed wheel step.
+fn wheel_easing_item(select: Entity<SelectState<Vec<WheelEasingOption>>>) -> SettingItem {
+    SettingItem::new(
+        tr!("pointer.wheel_easing"),
+        SettingField::render(move |_, _, _| {
+            div()
+                .flex_shrink_0()
+                .w(px(220.))
+                .h_6()
+                .child(control_select(&select).w(px(220.)).menu_width(px(220.)))
+        }),
+    )
+    .description(tr!("pointer.wheel_easing_description"))
+}
+
 /// A sensitivity slider laid out as the device pages lay theirs out — label
 /// and value on one line, the slider across the row — with "Default" beside
 /// the value while it rests there. A custom item has no title of its own, so
 /// its title and description are its search keywords.
-fn sensitivity_item<T: SliderUnit + std::fmt::Display>(
+fn sensitivity_item<T: SliderUnit + PartialEq>(
     title: SharedString,
     description: SharedString,
-    slider: Entity<SliderState>,
+    control: SliderWithEntry,
     max: T,
     default: T,
-    multiplier: fn(T) -> f64,
+    format: fn(T) -> String,
 ) -> SettingItem {
     SettingItem::render({
         let (title, description) = (title.clone(), description.clone());
         move |_, _, cx| {
+            let SliderWithEntry { slider, entry } = &control;
             let value = T::from_slider(slider.read(cx).value().start());
-            SliderRow::new(title.clone(), Slider::new(&slider).horizontal())
-                .value(
-                    format!("{value} ({:.1}\u{d7})", multiplier(value)),
-                    [format!("{max} ({:.1}\u{d7})", multiplier(max))],
-                )
+            SliderRow::new(title.clone(), slider_with_entry(slider, entry))
+                .value(format(value), [format(max)])
                 .when(value == default, |row| row.marker(tr!("common.default")))
                 .description(description.clone())
         }
     })
     .keywords([title, description])
+}
+
+/// A slider across the row with its typed-number field at the end.
+fn slider_with_entry(slider: &Entity<SliderState>, entry: &Entity<InputState>) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .gap_3()
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(Slider::new(slider).horizontal()),
+        )
+        .child(div().flex_shrink_0().w(px(72.)).child(control_input(entry)))
 }
 
 /// The launch-at-login switch — a persisted config value the agent reads

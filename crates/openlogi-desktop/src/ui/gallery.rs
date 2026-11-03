@@ -25,7 +25,10 @@ use super::battery::BatteryIndicator;
 use super::carousel::Carousel;
 use super::choice_card::ChoiceCard;
 use super::commit_slider::{CommitSlider, SliderRange};
-use super::components::{MenuRow, PanelCard, Pill, PresetChip, ProfileTab, Toggle, toggle_row};
+use super::components::{
+    MenuRow, PanelCard, Pill, PresetChip, ProfileTab, Toggle, control_input, toggle_row,
+};
+use super::number_entry::NumberEntry;
 use super::slider_row::{SliderRow, disabled_track};
 use super::status::{retry_line, status_line};
 use super::theme::{self, ContentWidth, OPENLOGI_DARK, OPENLOGI_LIGHT, Palette, Typography as _};
@@ -59,7 +62,7 @@ pub(crate) fn run() {
         };
         let opened = cx.open_window(options, |window, cx| {
             theme::apply_scale(window, UiScale::Normal);
-            let view = cx.new(ComponentGallery::new);
+            let view = cx.new(|cx| ComponentGallery::new(window, cx));
             cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
         });
 
@@ -108,13 +111,14 @@ struct ComponentGallery {
     slider_committed: u8,
     row_slider: CommitSlider<u8>,
     row_committed: u8,
+    row_entry: NumberEntry<u8>,
 }
 
 /// Where the gallery's slider row starts, and what it marks as the default.
 const ROW_DEFAULT: u8 = 14;
 
 impl ComponentGallery {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let slider_committed = 40;
         let slider = CommitSlider::new(
             SliderRange::new(0, 100),
@@ -128,6 +132,8 @@ impl ComponentGallery {
             cx,
             |this: &mut Self, value, _| this.row_committed = value,
         );
+        let row_entry =
+            NumberEntry::new(SliderRange::new(1, 100), ROW_DEFAULT, window, cx, |_, _| {});
         Self {
             mode: ThemeMode::Light,
             scale: UiScale::Normal,
@@ -142,6 +148,7 @@ impl ComponentGallery {
             slider_committed,
             row_slider,
             row_committed: ROW_DEFAULT,
+            row_entry,
         }
     }
 
@@ -477,7 +484,18 @@ impl ComponentGallery {
                 .child(
                     SliderRow::new(
                         "Sensitivity",
-                        Slider::new(self.row_slider.slider()).horizontal(),
+                        h_flex()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(Slider::new(self.row_slider.slider()).horizontal()),
+                            )
+                            .child(
+                                div()
+                                    .w(px(72.))
+                                    .child(control_input(self.row_entry.input())),
+                            ),
                     )
                     .value(shown.to_string(), ["100"])
                     .when(shown == ROW_DEFAULT, |row| row.marker("Default"))
@@ -601,6 +619,8 @@ impl ComponentGallery {
 impl Render for ComponentGallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         theme::apply_scale(window, self.scale);
+        self.row_entry
+            .sync(self.row_slider.shown(self.row_committed), window, cx);
         let pal = theme::palette(cx);
         v_flex()
             .size_full()
@@ -677,7 +697,7 @@ mod tests {
         cx.update(gpui_component::init);
         cx.update(theme::register_builtin_themes);
         cx.update(install_openlogi_themes);
-        let (view, cx) = cx.add_window_view(|_, cx| ComponentGallery::new(cx));
+        let (view, cx) = cx.add_window_view(ComponentGallery::new);
 
         cx.update(|window, cx| window.draw(cx).clear(cx));
         view.update(cx, |gallery, cx| {

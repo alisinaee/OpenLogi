@@ -7,7 +7,8 @@ use crate::platform::app_icon::AppIconExt as _;
 use gpui_component::ThemeMode;
 use openlogi_core::config::{
     AppIcon, AppSettings, Appearance, AssetSourcePreference, DeviceViewMode, MomentumScrolling,
-    MouseProfileTarget, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity,
+    MouseProfileTarget, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity, WheelEasing,
+    WheelFeel,
 };
 use openlogi_core::update_feed::UpdateChannel;
 
@@ -438,6 +439,46 @@ impl AppState {
         self.config
             .edit(|config| config.app_settings.show_desktop_switcher = enabled);
         self.persist_and_reload("desktop switcher overlay setting");
+        StateEvent::SettingsChanged.into()
+    }
+    /// Toggle macOS acceleration of the smoothed wheel and persist it. The
+    /// agent reads the new value on config reload. An already-set value
+    /// writes nothing and is still reported; disk failures restore the
+    /// persisted value.
+    pub fn commit_scroll_acceleration(&mut self, enabled: bool) -> StateEvents {
+        if self.config.app_settings.scroll_acceleration == enabled {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.scroll_acceleration = enabled);
+        self.persist_and_reload("scroll acceleration setting");
+        StateEvent::SettingsChanged.into()
+    }
+    /// Set the curve of a smoothed wheel step and persist it. The agent reads
+    /// the new value on config reload. An already-set value writes nothing and
+    /// is still reported; disk failures restore the persisted value.
+    pub fn commit_smooth_wheel_easing(&mut self, easing: WheelEasing) -> StateEvents {
+        if self.config.app_settings.smooth_wheel_easing == easing {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.smooth_wheel_easing = easing);
+        self.persist_and_reload("smooth wheel easing setting");
+        StateEvent::SettingsChanged.into()
+    }
+    /// Set the length of a smoothed wheel step in milliseconds, clamped into
+    /// [`WheelFeel::DURATION_MS_MIN`]`..=`[`WheelFeel::DURATION_MS_MAX`], and
+    /// persist it. The agent reads the new value on config reload. An
+    /// already-set value writes nothing and is still reported; disk failures
+    /// restore the persisted value.
+    pub fn commit_smooth_wheel_duration_ms(&mut self, duration_ms: u16) -> StateEvents {
+        let duration_ms = duration_ms.clamp(WheelFeel::DURATION_MS_MIN, WheelFeel::DURATION_MS_MAX);
+        if self.config.app_settings.smooth_wheel_duration_ms == duration_ms {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.smooth_wheel_duration_ms = duration_ms);
+        self.persist_and_reload("smooth wheel duration setting");
         StateEvent::SettingsChanged.into()
     }
     /// Set traditional vertical mouse-wheel sensitivity and persist it. The
