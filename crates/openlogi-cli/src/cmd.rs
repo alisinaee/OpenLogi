@@ -7,6 +7,7 @@ pub mod api;
 pub mod assets;
 pub mod backlight;
 pub mod camera;
+pub mod config;
 pub mod diag;
 pub mod fixture;
 #[cfg(target_os = "macos")]
@@ -19,6 +20,8 @@ pub mod snapshot;
 pub enum Command {
     /// Versioned JSON automation through the running agent (no hardware fallback).
     Api(api::ApiArgs),
+    /// Read and change every setting from the command line (JSON, validated, agent reload).
+    Config(config::ConfigArgs),
     /// List connected Logitech HID++ devices.
     List(list::ListArgs),
     /// Read or persistently set the keyboard backlight (HID++ 0x1982).
@@ -49,6 +52,7 @@ impl Command {
     pub async fn run(self) -> Result<ExitCode> {
         match self {
             Self::Api(command) => return api::run(command).await,
+            Self::Config(args) => return config::run(args).await,
             Self::List(args) => return list::run(args).await,
             Self::Backlight(args) => backlight::run(args).await?,
             // Camera capture is blocking AVFoundation — no need for the async runtime.

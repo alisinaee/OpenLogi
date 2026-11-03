@@ -18,7 +18,8 @@ use crate::agent;
 
 mod output;
 mod persistence;
-use output::{ApiError, devices, envelope, inventory_health, select_device, virtual_keyboard};
+pub(crate) use output::{ApiError, envelope, save_failure_code};
+use output::{devices, inventory_health, select_device, virtual_keyboard};
 use persistence::Save;
 
 /// Options shared by the JSON automation commands.

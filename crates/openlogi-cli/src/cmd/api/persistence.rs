@@ -2,13 +2,13 @@
 
 use std::path::Path;
 
-use openlogi_core::config::{Config, ConfigError, ConfigFile, SmartShift};
+use openlogi_core::config::{Config, ConfigFile, SmartShift};
 use openlogi_core::device_order::{DeviceIdentity, DeviceStableId};
 use openlogi_core::hid::{DeviceRoute, Dpi, ReportRate, SmartShiftStatus};
 use openlogi_ipc::{AgentClient, AgentSnapshot};
 use tarpc::context;
 
-use super::{ApiCommand, ApiError, select_device};
+use super::{ApiCommand, ApiError, save_failure_code, select_device};
 use crate::agent;
 
 pub(super) struct Save {
@@ -151,15 +151,7 @@ impl Save {
 
     pub(super) async fn commit(mut self, client: &AgentClient) -> Result<(), ApiError> {
         self.file.save(&self.config).map_err(|error| {
-            let code = match &error {
-                ConfigError::Conflict { .. } => "config_conflict",
-                ConfigError::Write { source, .. }
-                    if source.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    "config_busy"
-                }
-                _ => "config_save_failed",
-            };
+            let code = save_failure_code(&error);
             ApiError::new(
                 code,
                 format!("hardware readback succeeded, but configuration was not saved: {error}"),

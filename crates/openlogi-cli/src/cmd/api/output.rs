@@ -1,5 +1,6 @@
 //! Deliberate JSON projections: do not expose the entire internal IPC snapshot.
 
+use openlogi_core::config::ConfigError;
 use openlogi_core::hid::DeviceRoute;
 use openlogi_ipc::client::ConnectError;
 use openlogi_ipc::{AgentSnapshot, InventoryHealth, VirtualKeyboardStatus};
@@ -9,7 +10,7 @@ use serde_json::{Value, json};
 use crate::agent::CallFailure;
 
 #[derive(Debug, Serialize)]
-pub(super) struct ApiError {
+pub(crate) struct ApiError {
     code: &'static str,
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -17,7 +18,7 @@ pub(super) struct ApiError {
 }
 
 impl ApiError {
-    pub(super) fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -25,7 +26,13 @@ impl ApiError {
         }
     }
 
-    pub(super) fn after_write(mut self, persistence: &'static str) -> Self {
+    /// Name the setting the message is about.
+    pub(crate) fn within(mut self, key: &str) -> Self {
+        self.message = format!("{key}: {}", self.message);
+        self
+    }
+
+    pub(crate) fn after_write(mut self, persistence: &'static str) -> Self {
         self.persistence = Some(persistence);
         self
     }
@@ -52,7 +59,7 @@ impl From<CallFailure> for ApiError {
     }
 }
 
-pub(super) fn envelope(result: Result<Value, ApiError>) -> Value {
+pub(crate) fn envelope(result: Result<Value, ApiError>) -> Value {
     match result {
         Ok(data) => json!({ "schema_version": 1, "ok": true, "data": data }),
         Err(error) => json!({ "schema_version": 1, "ok": false, "error": error }),
@@ -143,5 +150,17 @@ pub(super) fn select_device(snapshot: &AgentSnapshot, id: &str) -> Result<Device
             "ambiguous_device",
             "the ID addresses multiple devices; no operation was attempted",
         )),
+    }
+}
+
+/// The stable error code for a failed config save: the one mapping every
+/// command that writes `config.toml` reports the same way.
+pub(crate) fn save_failure_code(error: &ConfigError) -> &'static str {
+    match error {
+        ConfigError::Conflict { .. } => "config_conflict",
+        ConfigError::Write { source, .. } if source.kind() == std::io::ErrorKind::WouldBlock => {
+            "config_busy"
+        }
+        _ => "config_save_failed",
     }
 }

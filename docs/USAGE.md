@@ -249,6 +249,81 @@ Stable error codes: `agent_unavailable`, `handshake_failed`, `version_mismatch`,
 `config_reload_failed`, and `config_reload_unknown`. A protocol mismatch requires matching
 OpenLogi CLI and agent builds; it never triggers direct-hardware fallback.
 
+## Configuration from the CLI
+
+`openlogi config` reads and changes every setting without the GUI, for scripts
+and AI agents. It edits the same `config.toml` the app uses, through the same
+types: a key or value the app would reject is rejected here with the app's own
+message, and nothing is written. Saves are atomic, keep comments, and refuse to
+overwrite a file edited meanwhile (`config_conflict`). After a save the running
+agent is asked to reload; **no agent running is a warning, not an error**
+(`"reload": "agent_unavailable"`), and the change applies when the agent next
+starts. Unlike `openlogi api`, no agent is needed.
+
+Every command except `path`, and `show`/`schema` without `--json`, prints one
+envelope in the [`openlogi api` shape](#output-and-compatibility)
+(`schema_version`, `ok`, `data` or `error`) and exits nonzero on failure.
+Error codes: `unknown_key`, `invalid_value`, `device_not_found`,
+`ambiguous_device`, `config_error`, `config_conflict`, `config_busy`,
+`config_save_failed`, `config_reload_failed`, `config_reload_unknown`.
+
+```sh
+openlogi config path
+openlogi config show --json                      # whole configuration
+openlogi config schema --json                    # every settable key: type, range, default, description
+openlogi config devices                          # devices and the keys --device takes
+openlogi config get smooth_scroll
+openlogi config set vertical_scroll_sensitivity 20
+openlogi config set appearance dark
+openlogi config set language null                # null unsets (back to the default)
+openlogi config unset theme_dark
+openlogi config set dpi 1600 --device "Desk mouse"
+openlogi config set smartshift '{"mode":"ratchet","auto_disengage":20,"tunable_torque":0}' --device unit:aabbccdd
+openlogi config set smartshift.mode free --device unit:aabbccdd
+openlogi config bindings list --device unit:aabbccdd
+openlogi config bindings set --device unit:aabbccdd Back BrowserBack
+openlogi config bindings set --device unit:aabbccdd Forward '{"short":"Copy","long":"Paste"}'
+openlogi config bindings set --device unit:aabbccdd --app com.apple.Safari Back Copy
+openlogi config bindings clear --device unit:aabbccdd Back
+```
+
+**Keys.** A key is dotted. Without `--device` it is relative to the document root,
+and a key that is not a root table is taken as an `app_settings` key, so
+`smooth_scroll` and `app_settings.smooth_scroll` are the same. With `--device` it
+is relative to that device, so `dpi` means `devices.<device>.dpi`. Quote a segment
+that contains a dot: `devices."unit:1".per_app_bindings."com.apple.Safari"`.
+`--device` takes the config key (see `config devices`) or, case-insensitively, the
+custom name, model name or codename; an ambiguous name is refused. It addresses
+the configuration, not hardware: the opaque route IDs of `openlogi api` are not
+accepted.
+
+**Values.** A value is JSON (`true`, `12`, `"text"`, `[400,800]`, `{"a":1}`), a TOML
+inline value (`{ short = "Copy", long = "Paste" }`), or a bare word taken as a
+string (`dark`, `BrowserBack`). `null` unsets the key. `get` returns `value` (the
+stored one, or the default when unset), `set` (whether it is stored) and `default`.
+`set` returns `previous`, `value`, `changed` and `persistence` (`saved` or
+`unchanged`); an identical value does not rewrite the file.
+
+**Bindings.** `bindings list` shows the stored bindings; a button without one runs
+its built-in default, and `bindings clear` restores that. A binding is a plain
+action name, or one of the structured forms the configuration accepts (long-press
+`{short, long}`, wheel-hold, per-direction gesture); `config schema --json` lists
+the forms and the full action vocabulary under `data.bindings`. Button names are
+the ones `list` prints (`Back`, `Forward`, `Thumbwheel`, `control:0x010a`, ...);
+different spellings of the same button are folded into one. `--app` takes the
+application key as stored: a bundle id, `exe:<file>` or `app:<alias>`.
+
+**Schema.** `config schema --json` returns `data.settings`, one object per key:
+`path`, `scope` (`app`, `device`, `root`), `type`, `default`, `unset_allowed`,
+optional `min`/`max`/`values`, `description`, and `annotated`. Keys the core types
+accept but this table has not described yet are still listed (`annotated:
+false`, `description: null`) and are settable, so a new setting appears with no
+CLI change. Ranges marked "clamped" are applied by the app, not rejected.
+
+**Other options.** `--no-reload` saves without contacting the agent. `--config
+<PATH>` works on another file (and never asks the agent to reload it), which is
+how tests and scripts avoid touching the real configuration.
+
 ## Asset synchronization
 
 Asset synchronization probes `assets.openlogi.org`, the Cloudflare Pages alias
