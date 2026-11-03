@@ -88,6 +88,7 @@ pub(crate) fn action_icon_path(action: &Action) -> &'static str {
         Action::ReloadPage => "action-icons/rotate-cw.svg",
         Action::MissionControl | Action::ShowActionsRing => "action-icons/layout-grid.svg",
         Action::AppExpose | Action::GShift => "action-icons/layers.svg",
+        Action::AppSwitcher => "action-icons/arrow-left-right.svg",
         Action::PreviousDesktop => "action-icons/square-arrow-left.svg",
         Action::NextDesktop => "action-icons/square-arrow-right.svg",
         Action::ShowDesktop => "action-icons/monitor.svg",
