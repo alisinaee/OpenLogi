@@ -467,3 +467,27 @@ fn a_late_wakeup_delays_only_the_frames_already_due() {
     assert_eq!(order, (0..frames.len()).collect::<Vec<_>>());
     assert_eq!(out.sleeps, frames.len() - 3);
 }
+
+#[test]
+fn pending_asks_replay_one_step_at_a_time_and_cancel_when_opposite() {
+    let mut pending = Pending::default();
+    for _ in 0..3 {
+        pending.push(Direction::Next);
+    }
+    assert_eq!(pending.take(), Some(Direction::Next));
+    pending.push(Direction::Previous);
+    assert_eq!(pending.take(), Some(Direction::Next));
+    assert_eq!(pending.take(), None);
+
+    for _ in 0..20 {
+        pending.push(Direction::Previous);
+    }
+    let mut steps = 0;
+    while pending.take().is_some() {
+        steps += 1;
+    }
+    assert_eq!(steps, 8, "the backlog is capped");
+    pending.push(Direction::Next);
+    pending.clear();
+    assert_eq!(pending.take(), None);
+}

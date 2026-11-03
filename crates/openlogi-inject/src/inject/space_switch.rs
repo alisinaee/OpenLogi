@@ -344,6 +344,46 @@ pub(super) fn run(
     }
 }
 
+/// Switches requested while one is in flight, as a net count of steps (Next
+/// positive). A roll across several desktops asks for each step before the
+/// first is confirmed; dropping those asks would stop the roll after one
+/// desktop. Opposite asks cancel, so a roll back never overshoots, and the
+/// backlog is capped so a runaway wheel cannot queue seconds of switching.
+#[derive(Debug, Default)]
+pub(super) struct Pending(i32);
+
+impl Pending {
+    pub(super) const fn new() -> Self {
+        Self(0)
+    }
+
+    const CAP: i32 = 8;
+
+    pub(super) fn push(&mut self, direction: Direction) {
+        let step = match direction {
+            Direction::Previous => -1,
+            Direction::Next => 1,
+        };
+        self.0 = (self.0 + step).clamp(-Self::CAP, Self::CAP);
+    }
+
+    /// The next step to take, if any asks remain.
+    pub(super) fn take(&mut self) -> Option<Direction> {
+        let direction = match self.0.signum() {
+            1 => Direction::Next,
+            -1 => Direction::Previous,
+            _ => return None,
+        };
+        self.0 -= self.0.signum();
+        Some(direction)
+    }
+
+    /// Forget the backlog: the switch it followed did not land where planned.
+    pub(super) fn clear(&mut self) {
+        self.0 = 0;
+    }
+}
+
 /// Single in-flight transaction; no queue of relative actions that can run
 /// later on a different display. The owned lease also releases on spawn failure.
 pub(super) struct Lease<'a>(&'a AtomicBool);

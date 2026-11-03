@@ -34,7 +34,7 @@ use objc2_foundation::{
 };
 
 use super::super::space_switch::{
-    self, Backend, Direction, Failure, Lease, Pace, PostGate, SlideFrame, SlidePhase, SpaceState,
+    self, Backend, Direction, Failure, Lease, Pace, Pending, PostGate, SlideFrame, SlidePhase, SpaceState,
 };
 use super::super::{DesktopObserver, DesktopPosition, DesktopSwitch};
 use super::{app_services, app_services_symbol};
@@ -127,20 +127,44 @@ pub(super) fn next_desktop() {
     start(Direction::Next);
 }
 
+/// Asks that arrived while a switch was in flight; see [`Pending`].
+static PENDING: Mutex<Pending> = Mutex::new(Pending::new());
+
+fn pending() -> std::sync::MutexGuard<'static, Pending> {
+    PENDING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn start(direction: Direction) {
-    let Some(lease) = Lease::acquire(&BUSY) else {
-        tracing::debug!(?direction, "Space switch already pending — skipped");
-        return;
+    // Decide under the backlog lock, so an ask that loses the lease is seen
+    // by the worker that hands the lease on (or releases it) under the same lock.
+    let lease = {
+        let mut backlog = pending();
+        match Lease::acquire(&BUSY) {
+            Some(lease) => lease,
+            None => {
+                backlog.push(direction);
+                tracing::debug!(?direction, "Space switch in flight — queued for next");
+                return;
+            }
+        }
     };
+    begin(direction, lease);
+}
+
+/// Run one switch holding `lease`, then hand the lease to the next queued
+/// step at once (no wait between the steps of a roll) or release it.
+fn begin(direction: Direction, lease: Lease<'static>) {
     // Capture the display before scheduling. A moved cursor must not retarget
     // a delayed action to another monitor; `post` checks it again.
     let Some(display_id) = cursor_display() else {
         tracing::warn!(?direction, "Space switch: cursor display unavailable");
+        pending().clear();
         return;
     };
     // Read once: a setting changed mid-switch applies to the next one.
     let switch = desktop_switch();
     let result = space_switch::spawn_ordered(move |gate| {
+        let mut landed = false;
         let reported = autoreleasepool(|_| {
             let result = Native::new(display_id, switch).and_then(|mut native| {
                 let outcome = space_switch::run(&mut native, direction, gate)?;
@@ -150,6 +174,7 @@ fn start(direction: Direction) {
             });
             match result {
                 Ok((outcome, state)) => {
+                    landed = matches!(outcome, space_switch::Outcome::Reached(_));
                     tracing::debug!(
                         display_id,
                         ?direction,
@@ -170,9 +195,27 @@ fn start(direction: Direction) {
                 }
             }
         });
-        // The switch is done: free the single-flight lease before reading
-        // windows for the switcher, so a quick next press is never skipped.
-        drop(lease);
+        // The switch is done. Next queued step goes first, before any
+        // switcher work: reporting never delays the roll.
+        let next = {
+            let mut backlog = pending();
+            if !landed {
+                backlog.clear();
+            }
+            let next = backlog.take();
+            if next.is_none() {
+                drop(lease);
+                None
+            } else {
+                next.map(|direction| (direction, lease))
+            }
+        };
+        if let Some((direction, lease)) = next {
+            // Reports of intermediate desktops are superseded anyway; the
+            // roll's last switch reports where it ended.
+            begin(direction, lease);
+            return;
+        }
         if let Some(state) = reported {
             autoreleasepool(|_| report(display_id, &state));
         }
