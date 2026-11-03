@@ -53,6 +53,7 @@ pub(super) use openlogi_permissions::PermissionStatus;
 use crate::windows::{self, AuxWindow};
 
 mod about;
+mod ai_agent;
 mod appearance;
 mod assets;
 // Event-tap enumeration is a macOS (`CGEventTap`) concept; the Diagnostics page
@@ -93,9 +94,9 @@ impl SettingsPage {
             // there (see the `mod permissions` cfg).
             Self::About => {
                 if cfg!(any(target_os = "macos", target_os = "linux")) {
-                    5
+                    6
                 } else {
-                    4
+                    5
                 }
             }
         }
@@ -162,6 +163,8 @@ pub struct SettingsView {
     /// re-walking the cache on every render. A snapshot — reopen to refresh
     /// after a Clear.
     asset_cache_desc: SharedString,
+    /// The AI agent page's skill status and last action result.
+    skill: ai_agent::SkillPanel,
     /// Snapshot of the agent service's registration status, taken when the
     /// window opens, regains focus, and after every settings change (the status
     /// read is an XPC round-trip, so it must not run per frame). Drives the
@@ -291,6 +294,7 @@ impl SettingsView {
             copied: false,
             copied_gen: 0,
             asset_cache_desc: assets::cache_size_description(),
+            skill: ai_agent::SkillPanel::default(),
             registration_status: crate::platform::registration::status(),
             #[cfg(all(target_os = "macos", debug_assertions))]
             _monitor_task: monitor_task,
@@ -546,7 +550,11 @@ pub fn open_at(page: SettingsPage, cx: &mut App) {
         // than the macOS system font (Segoe UI tipped the old 840 into
         // clipping the hero rows' trailing buttons on Windows).
         Size::new(px(920.), px(640.)),
-        move |window, cx| SettingsView::new(page, window, cx),
+        move |window, cx| {
+            let view = SettingsView::new(page, window, cx);
+            SettingsView::refresh_skill(cx);
+            view
+        },
         cx,
     );
 }
@@ -616,6 +624,7 @@ impl Render for SettingsView {
                 self.asset_source_select.clone(),
                 self.asset_cache_desc.clone(),
             ))
+            .page(ai_agent::ai_agent_page(view.clone()))
             .page(about::about_page(view, self.copied));
         // Surfaces competing macOS event taps (a pointer-lag cause) and, in debug
         // builds, the full tap list and a live event monitor. Appended after
