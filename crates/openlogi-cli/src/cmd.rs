@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::Subcommand;
 
+pub mod agent_skill;
 pub mod api;
 pub mod assets;
 pub mod backlight;
@@ -20,6 +21,8 @@ pub mod snapshot;
 pub enum Command {
     /// Versioned JSON automation through the running agent (no hardware fallback).
     Api(api::ApiArgs),
+    /// Install the AI-agent skill that teaches an agent to drive this CLI.
+    AgentSkill(agent_skill::AgentSkillArgs),
     /// Read and change every setting from the command line (JSON, validated, agent reload).
     Config(config::ConfigArgs),
     /// List connected Logitech HID++ devices.
@@ -52,6 +55,7 @@ impl Command {
     pub async fn run(self) -> Result<ExitCode> {
         match self {
             Self::Api(command) => return api::run(command).await,
+            Self::AgentSkill(args) => return agent_skill::run(args),
             Self::Config(args) => return config::run(args).await,
             Self::List(args) => return list::run(args).await,
             Self::Backlight(args) => backlight::run(args).await?,
