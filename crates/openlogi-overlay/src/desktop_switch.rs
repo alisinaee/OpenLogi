@@ -196,6 +196,10 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
     if reused {
         return;
     }
+    // Centred like the system app switcher; Windows keeps its taskbar-anchored notice spot.
+    #[cfg(not(target_os = "windows"))]
+    let mut placement = NoticePlacement::capture_centred(cx, window_size(boxes(switcher)));
+    #[cfg(target_os = "windows")]
     let mut placement = match NoticePlacement::capture(cx, window_size(boxes(switcher))) {
         Ok(placement) => placement,
         Err(error) => {

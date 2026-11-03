@@ -5,7 +5,7 @@ use gpui::{
 };
 use tracing::warn;
 
-use crate::notice::{bottom_centre, notice_window_options};
+use crate::notice::{bottom_centre, centre, notice_window_options};
 use crate::ring::{Placement, WINDOW_SIZE, clamp_window_origin, ring_window_options};
 
 /// Captured placement for one invocation, before its windows are opened.
@@ -87,6 +87,17 @@ impl NoticePlacement {
             vec![positioned_notice(cx, size)]
         };
         Ok(Self { attempts })
+    }
+
+    /// Like [`Self::capture`], but centred on the cursor's display instead of
+    /// at its bottom edge.
+    pub(crate) fn capture_centred(cx: &mut gpui::App, size: Size<Pixels>) -> Self {
+        let attempts = if on_wayland() {
+            wayland_notice_windows(size)
+        } else {
+            vec![positioned_notice_at(cx, size, centre)]
+        };
+        Self { attempts }
     }
 
     /// Window options to try in order; the first that opens is the notice.
@@ -183,11 +194,19 @@ fn positioned_window(cx: &gpui::App) -> (WindowOptions, Placement) {
 /// The notice at the bottom centre of the cursor's display, above the Dock
 /// where the platform reports it.
 fn positioned_notice(cx: &gpui::App, size: Size<Pixels>) -> WindowOptions {
+    positioned_notice_at(cx, size, bottom_centre)
+}
+
+fn positioned_notice_at(
+    cx: &gpui::App,
+    size: Size<Pixels>,
+    place: fn(Bounds<Pixels>, Size<Pixels>) -> Point<Pixels>,
+) -> WindowOptions {
     let screen = cursor_screen(cx);
     let origin = screen
         .usable
         .or(screen.bounds)
-        .map_or_else(Point::default, |area| bottom_centre(area, size));
+        .map_or_else(Point::default, |area| place(area, size));
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size))),
         display_id: screen.display_id,

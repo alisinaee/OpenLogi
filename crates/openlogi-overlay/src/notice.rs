@@ -143,6 +143,20 @@ pub(crate) fn bottom_centre(
     desired.clamp(&area.origin, &max)
 }
 
+/// Top-left of a window of `window` size centred in `area`, kept inside it.
+#[cfg(any(not(windows), test))]
+pub(crate) fn centre(area: gpui::Bounds<Pixels>, window: Size<Pixels>) -> gpui::Point<Pixels> {
+    let desired = gpui::point(
+        area.origin.x + (area.size.width - window.width) / 2.0,
+        area.origin.y + (area.size.height - window.height) / 2.0,
+    );
+    let max = gpui::point(
+        (area.right() - window.width).max(area.origin.x),
+        (area.bottom() - window.height).max(area.origin.y),
+    );
+    desired.clamp(&area.origin, &max)
+}
+
 /// Appearance shared by the platform-specific notice placements.
 pub(crate) fn notice_window_options() -> WindowOptions {
     WindowOptions {
