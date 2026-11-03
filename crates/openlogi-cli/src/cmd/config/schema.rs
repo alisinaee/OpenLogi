@@ -272,6 +272,27 @@ const APP: &[Spec] = &[
         Kind::Bool,
         "Show the desktop switcher overlay after Previous/Next Desktop (macOS).",
     ),
+    spec(
+        "desktop_switcher_show_apps",
+        Kind::Bool,
+        "Map each desktop in the switcher: window outlines and app icons; needs show_desktop_switcher (macOS).",
+    ),
+    spec(
+        "scroll_acceleration",
+        Kind::Bool,
+        "Let macOS accelerate the smoothed wheel; false scrolls every notch the same distance (macOS).",
+    ),
+    int(
+        "smooth_wheel_duration_ms",
+        40,
+        400,
+        "Milliseconds one smoothed wheel step takes to play out; clamped into range.",
+    ),
+    choice(
+        "smooth_wheel_easing",
+        &["smooth", "ease_out", "linear"],
+        "Curve a smoothed wheel step follows.",
+    ),
 ];
 
 const DEVICE: &[Spec] = &[
@@ -597,6 +618,8 @@ pub(super) fn document() -> Value {
             "forms": [
                 { "form": "action", "example": "BrowserBack" },
                 { "form": "long_press", "example": { "short": "Copy", "long": "Paste" } },
+                { "form": "long_press_hold", "example": { "short": "Copy", "long": "Paste", "hold_ms": 1000 }, "hold_ms": "200..=3000, default 500; also valid in a per-app binding" },
+                { "form": "app_switcher", "example": { "AppSwitcher": { "step": 60, "hold_ms": 250 } }, "step": "10..=1000 mouse counts, default 60; hold_ms 200..=3000, default 250; plain \"AppSwitcher\" uses the defaults" },
                 { "form": "wheel_hold", "example": { "click": "Back", "wheel": "HorizontalScroll" } },
                 { "form": "gesture", "example": { "Click": "Back", "Up": "MissionControl" } },
             ],

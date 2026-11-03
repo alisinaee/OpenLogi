@@ -78,9 +78,10 @@ openlogi config bindings clear --device unit:aabbccdd Back      # back to built-
 - Button names are those `openlogi list` / `bindings list` print (`Back`,
   `Forward`, `Thumbwheel`, `control:0x010a`, ...).
 - A binding is a plain action name or a structured form from the schema:
-  long-press `{"short":A,"long":B}`, wheel-hold, per-direction gesture. When the
-  schema lists a hold threshold (`hold_ms`, per app or per device), set it with
-  `config set`; only use it if `config schema --json` shows it.
+  long-press `{"short":A,"long":B,"hold_ms":N}` (`hold_ms` 200-3000, default
+  500, also valid in a per-app binding), wheel-hold, per-direction gesture, and
+  the app switcher `"AppSwitcher"` or `{"AppSwitcher":{"step":60,"hold_ms":250}}`
+  (`step` 10-1000 mouse counts). A shortcut action is `{"CustomShortcut":"Cmd+Alt+Left"}`.
 - `--app` is the key as stored: a bundle id (`com.apple.Safari`), `exe:<file>`
   or `app:<alias>`. Find a macOS bundle id with
   `osascript -e 'id of app "Arc"'`. Omit `--app` for the device-wide binding.
@@ -114,10 +115,21 @@ openlogi config set smooth_wheel_easing <value from schema `values`>
 openlogi config set smooth_wheel_duration_ms 150
 ```
 
-Desktop switcher overlay after Previous/Next Desktop (macOS):
+Desktop switcher overlay after Previous/Next Desktop (macOS), with each
+desktop's windows and apps mapped in its boxes:
 
 ```sh
 openlogi config set show_desktop_switcher true
+openlogi config set desktop_switcher_show_apps true
+```
+
+App switcher on the DPI button: a tap switches to the previous app, a hold opens
+the native switcher and sideways mouse movement steps through it:
+
+```sh
+D=unit:aabbccdd
+openlogi config bindings set --device $D DpiToggle AppSwitcher
+openlogi config bindings set --device $D DpiToggle '{"AppSwitcher":{"step":80,"hold_ms":300}}'   # tuned
 ```
 
 Back/Forward short press, long press for another action, only in Arc
@@ -127,6 +139,12 @@ Back/Forward short press, long press for another action, only in Arc
 D=unit:aabbccdd
 openlogi config bindings set --device $D --app company.thebrowser.Browser Back '{"short":"BrowserBack","long":"PreviousTab"}'
 openlogi config bindings set --device $D --app company.thebrowser.Browser Forward '{"short":"BrowserForward","long":"NextTab"}'
+```
+
+Arc: Back taps Cmd+Alt+Left, holding it for one second sends Cmd+Alt+Right:
+
+```sh
+openlogi config bindings set --device $D --app company.thebrowser.Browser Back '{"short":{"CustomShortcut":"Cmd+Alt+Left"},"long":{"CustomShortcut":"Cmd+Alt+Right"},"hold_ms":1000}'
 ```
 
 Confirm the action names against `config schema --json` first; the names above
