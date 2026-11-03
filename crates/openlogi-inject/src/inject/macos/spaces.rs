@@ -34,7 +34,8 @@ use objc2_foundation::{
 };
 
 use super::super::space_switch::{
-    self, Backend, Direction, Failure, Lease, Pace, Pending, PostGate, SlideFrame, SlidePhase, SpaceState,
+    self, Backend, Direction, Failure, Lease, Pace, Pending, PostGate, SlideFrame, SlidePhase,
+    SpaceState,
 };
 use super::super::{DesktopObserver, DesktopPosition, DesktopSwitch};
 use super::{app_services, app_services_symbol};
@@ -139,14 +140,12 @@ fn start(direction: Direction) {
     // by the worker that hands the lease on (or releases it) under the same lock.
     let lease = {
         let mut backlog = pending();
-        match Lease::acquire(&BUSY) {
-            Some(lease) => lease,
-            None => {
-                backlog.push(direction);
-                tracing::debug!(?direction, "Space switch in flight — queued for next");
-                return;
-            }
-        }
+        let Some(lease) = Lease::acquire(&BUSY) else {
+            backlog.push(direction);
+            tracing::debug!(?direction, "Space switch in flight — queued for next");
+            return;
+        };
+        lease
     };
     begin(direction, lease);
 }

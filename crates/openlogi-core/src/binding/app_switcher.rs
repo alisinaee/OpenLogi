@@ -22,6 +22,13 @@ use super::value::{HoldThreshold, LongPressBinding};
 /// mid-hold) must not leave that modifier stuck.
 pub const APP_SWITCHER_HOLD_LIMIT: Duration = Duration::from_secs(10);
 
+/// The least time the switcher modifier stays down after the last key the hold
+/// typed (the opening Tab or a step). The native switcher handles keys
+/// asynchronously: a modifier release that follows the last Tab within a
+/// millisecond can be handled first, so the switcher activates the app one
+/// step short, or not the highlighted one at all.
+pub const APP_SWITCHER_SETTLE: Duration = Duration::from_millis(60);
+
 /// Most steps one motion report may take. A report that moves further than
 /// this is a sensor glitch, not a deliberate sweep, and the excess is dropped.
 const MAX_STEPS_PER_REPORT: u16 = 4;

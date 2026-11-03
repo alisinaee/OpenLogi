@@ -145,3 +145,32 @@ fn restarting_a_press_releases_the_hold_it_replaces() {
     switchers.end(&token);
     assert_eq!(second.released.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn the_modifier_outlasts_the_last_typed_key_by_the_settle_time() {
+    let log = Arc::new(Log::default());
+    let settle = Duration::from_millis(80);
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&log))),
+        stepper: stepper(60),
+        last_key: Instant::now(),
+        settle,
+    };
+    hold.motion(70);
+    let stepped = Instant::now();
+    assert!(hold.release());
+    assert!(stepped.elapsed() >= settle.saturating_sub(Duration::from_millis(5)));
+    assert_eq!(log.released.load(Ordering::SeqCst), 1);
+    // A hold that was left alone long enough lets go without waiting.
+    let idle = Arc::new(Log::default());
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&idle))),
+        stepper: stepper(60),
+        last_key: Instant::now().checked_sub(settle).expect("uptime"),
+        settle,
+    };
+    let started = Instant::now();
+    assert!(hold.release());
+    assert!(started.elapsed() < Duration::from_millis(40));
+    assert!(!hold.release());
+}

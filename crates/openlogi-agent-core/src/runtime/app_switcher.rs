@@ -11,11 +11,11 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use openlogi_core::binding::{
-    APP_SWITCHER_HOLD_LIMIT, Action, AppSwitcherParams, HeldKeys, SwitchDirection, SwitchStepper,
-    switcher_chord,
+    APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, Action, AppSwitcherParams, HeldKeys,
+    SwitchDirection, SwitchStepper, switcher_chord,
 };
 use tracing::{debug, warn};
 
@@ -57,6 +57,9 @@ impl SwitcherKeys for SystemKeys {
 struct SwitcherHold<K: SwitcherKeys> {
     keys: Option<K>,
     stepper: SwitchStepper,
+    /// When the hold last typed a key, and how long the modifier must outlast it.
+    last_key: Instant,
+    settle: Duration,
 }
 
 impl<K: SwitcherKeys> SwitcherHold<K> {
@@ -65,14 +68,27 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
             return;
         };
         if let Some(run) = self.stepper.motion(dx) {
+            debug!(?run, "app switcher step");
             for _ in 0..run.count {
                 keys.step(run.direction);
             }
+            self.last_key = Instant::now();
         }
     }
 
     /// Let go of the modifier. Idempotent.
+    ///
+    /// The modifier outlasts the last typed key by the settle time, so the
+    /// native switcher has handled that key before it sees the release.
     fn release(&mut self) -> bool {
+        if self.keys.is_none() {
+            return false;
+        }
+        let wait = self.settle.saturating_sub(self.last_key.elapsed());
+        if !wait.is_zero() {
+            thread::sleep(wait);
+        }
+        debug!(?wait, "app switcher modifier released");
         self.keys.take().is_some()
     }
 }
@@ -87,9 +103,15 @@ pub(super) struct ActiveHold<K: SwitcherKeys> {
 
 impl<K: SwitcherKeys> ActiveHold<K> {
     pub(super) fn start(keys: K, stepper: SwitchStepper, limit: Duration) -> Self {
+        Self::start_settling(keys, stepper, limit, APP_SWITCHER_SETTLE)
+    }
+
+    fn start_settling(keys: K, stepper: SwitchStepper, limit: Duration, settle: Duration) -> Self {
         let hold = Arc::new(Mutex::new(SwitcherHold {
             keys: Some(keys),
             stepper,
+            last_key: Instant::now(),
+            settle,
         }));
         let (retire, retired) = mpsc::channel::<()>();
         let watched = Arc::clone(&hold);
