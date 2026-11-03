@@ -93,6 +93,59 @@ fn desktop_switch_animation_persists_and_reloads_only_when_changed() {
 }
 
 #[test]
+fn desktop_switcher_overlay_persists_and_reloads_only_when_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let (config, file) = ConfigFile::load_from_path(&path).unwrap();
+    let resolver = AssetResolver::new();
+    let (commands, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut state = AppState::new(Sources {
+        persistence: ConfigPersistence::UserFile(file),
+        ..Sources::in_memory(config, &resolver, commands)
+    });
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(crate::services::ipc::Command::LoadConfig(_))
+    ));
+    assert!(
+        state.app_settings().show_desktop_switcher,
+        "the desktop switcher shows unless the user turns it off"
+    );
+
+    for enabled in [false, true] {
+        assert_eq!(
+            state.commit_show_desktop_switcher(enabled),
+            [StateEvent::SettingsChanged]
+        );
+        assert_eq!(state.app_settings().show_desktop_switcher, enabled);
+        assert_eq!(
+            Config::load_from_path(&path)
+                .unwrap()
+                .app_settings
+                .show_desktop_switcher,
+            enabled
+        );
+        assert!(
+            matches!(
+                receiver.try_recv(),
+                Ok(crate::services::ipc::Command::ReloadConfig(_))
+            ),
+            "a save reloads the agent"
+        );
+        assert!(receiver.try_recv().is_err());
+
+        assert_eq!(
+            state.commit_show_desktop_switcher(enabled),
+            [StateEvent::SettingsChanged]
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "an unchanged setting must not reload"
+        );
+    }
+}
+
+#[test]
 fn mouse_profile_target_persists_and_reloads_only_when_changed() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);

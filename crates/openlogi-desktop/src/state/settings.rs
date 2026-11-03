@@ -427,6 +427,19 @@ impl AppState {
         self.persist_and_reload("desktop switch animation setting");
         StateEvent::SettingsChanged.into()
     }
+    /// Toggle the overlay shown after Previous/Next Desktop and persist it.
+    /// The overlay process reads the new value on config reload. An
+    /// already-set value writes nothing and is still reported; disk failures
+    /// restore the persisted value.
+    pub fn commit_show_desktop_switcher(&mut self, enabled: bool) -> StateEvents {
+        if self.config.app_settings.show_desktop_switcher == enabled {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.show_desktop_switcher = enabled);
+        self.persist_and_reload("desktop switcher overlay setting");
+        StateEvent::SettingsChanged.into()
+    }
     /// Set traditional vertical mouse-wheel sensitivity and persist it. The
     /// agent publishes the value to its scroll worker on config reload. An
     /// already-set value writes nothing and is still reported; disk failures
