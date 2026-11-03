@@ -35,6 +35,7 @@ pub(super) use gpui_updater::{UpdateStatus, Updater};
 pub(super) use openlogi_core::brand::{HELP_URL, RELEASES_URL, REPO_URL};
 pub(super) use openlogi_core::config::{
     Appearance, AssetSourcePreference, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity,
+    WheelFeel,
 };
 
 pub(super) use crate::app::menu::{CloseWindow, Minimize, Zoom};
@@ -42,6 +43,7 @@ use crate::features::pointer::momentum::{MomentumPanel, MomentumScope};
 pub(super) use crate::services::assets::sync::{AssetCommand, AssetControl};
 pub(super) use crate::state::{AppState, StateEvent};
 use crate::ui::commit_slider::{CommitSlider, SliderRange};
+use crate::ui::number_entry::NumberEntry;
 pub(super) use crate::ui::theme::{self, Palette};
 #[cfg(target_os = "macos")]
 pub(super) use openlogi_permissions::Permission;
@@ -109,6 +111,13 @@ pub(super) enum ThemeFilter {
     Dark,
 }
 
+/// The typed-number fields beside the three scroll sliders.
+struct ScrollEntries {
+    thumbwheel: NumberEntry<ThumbwheelSensitivity>,
+    vertical_scroll: NumberEntry<VerticalScrollSensitivity>,
+    wheel_duration: NumberEntry<u16>,
+}
+
 /// Standalone Settings window root view.
 pub struct SettingsView {
     focus_handle: FocusHandle,
@@ -130,6 +139,10 @@ pub struct SettingsView {
     asset_source_select: Entity<SelectState<Vec<assets::AssetSourceOption>>>,
     thumbwheel_sensitivity: CommitSlider<ThumbwheelSensitivity>,
     vertical_scroll_sensitivity: CommitSlider<VerticalScrollSensitivity>,
+    /// The typed-number fields beside the three scroll sliders.
+    scroll_entries: ScrollEntries,
+    wheel_duration: CommitSlider<u16>,
+    wheel_easing_select: Entity<SelectState<Vec<general::WheelEasingOption>>>,
     /// The General page's momentum-scrolling card: the app-wide default.
     momentum_panel: Entity<MomentumPanel>,
     /// Shared app-wide updater, surfaced on the Updates page. A launch-time
@@ -225,8 +238,6 @@ impl SettingsView {
         cx.subscribe_in(&asset_source_select, window, Self::on_asset_source_select)
             .detach();
 
-        let thumbwheel_sensitivity = Self::thumbwheel_sensitivity_slider(cx);
-        let vertical_scroll_sensitivity = Self::vertical_scroll_sensitivity_slider(cx);
         let momentum_panel = cx.new(|cx| MomentumPanel::new(MomentumScope::General, cx));
 
         // Poll the agent's live event monitor while this window is open. The task
@@ -269,8 +280,11 @@ impl SettingsView {
             initial_page,
             language_select,
             asset_source_select,
-            thumbwheel_sensitivity,
-            vertical_scroll_sensitivity,
+            thumbwheel_sensitivity: Self::thumbwheel_sensitivity_slider(cx),
+            vertical_scroll_sensitivity: Self::vertical_scroll_sensitivity_slider(cx),
+            scroll_entries: Self::scroll_entries(window, cx),
+            wheel_duration: Self::wheel_duration_slider(cx),
+            wheel_easing_select: Self::wheel_easing_select(window, cx),
             momentum_panel,
             updater,
             updater_obs,
@@ -280,6 +294,40 @@ impl SettingsView {
             registration_status: crate::platform::registration::status(),
             #[cfg(all(target_os = "macos", debug_assertions))]
             _monitor_task: monitor_task,
+        }
+    }
+
+    /// Re-seat the scroll sliders and fields on the persisted values.
+    fn sync_scroll_controls(&self, window: &mut Window, cx: &mut Context<Self>) {
+        // A failed write restores AppState's persisted configuration. Re-seat
+        // these independently owned sliders so neither can keep presenting the
+        // rejected value after that rollback.
+        if let Some(settings) = AppState::try_read(cx).map(AppState::app_settings) {
+            let (vertical_scroll, thumbwheel, duration) = (
+                settings.vertical_scroll_sensitivity,
+                settings.thumbwheel_sensitivity,
+                settings.smooth_wheel_duration_ms,
+            );
+            self.vertical_scroll_sensitivity
+                .sync(vertical_scroll, window, cx);
+            self.thumbwheel_sensitivity.sync(thumbwheel, window, cx);
+            self.wheel_duration.sync(duration, window, cx);
+            // The fields follow what the sliders show, a drag included.
+            self.scroll_entries.vertical_scroll.sync(
+                self.vertical_scroll_sensitivity.shown(vertical_scroll),
+                window,
+                cx,
+            );
+            self.scroll_entries.thumbwheel.sync(
+                self.thumbwheel_sensitivity.shown(thumbwheel),
+                window,
+                cx,
+            );
+            self.scroll_entries.wheel_duration.sync(
+                self.wheel_duration.shown(duration),
+                window,
+                cx,
+            );
         }
     }
 
@@ -337,6 +385,92 @@ impl SettingsView {
                 });
             },
         )
+    }
+
+    /// The smoothed-wheel easing picker, committed on confirm.
+    fn wheel_easing_select(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<SelectState<Vec<general::WheelEasingOption>>> {
+        let current = AppState::try_read(cx)
+            .map_or_else(Default::default, |s| s.app_settings().smooth_wheel_easing);
+        let options = general::wheel_easing_options();
+        let selected = general::selected_easing_index(current, &options);
+        let select = cx.new(|cx| SelectState::new(options, Some(selected), window, cx));
+        cx.subscribe_in(&select, window, Self::on_wheel_easing_select)
+            .detach();
+        select
+    }
+
+    /// The smoothed-wheel step length slider, committed once it is released.
+    fn wheel_duration_slider(cx: &mut Context<Self>) -> CommitSlider<u16> {
+        let current = AppState::try_read(cx).map_or(WheelFeel::DURATION_MS_DEFAULT, |state| {
+            state.app_settings().smooth_wheel_duration_ms
+        });
+        CommitSlider::new(
+            SliderRange::new(WheelFeel::DURATION_MS_MIN, WheelFeel::DURATION_MS_MAX).step(10.),
+            current,
+            cx,
+            |_, duration_ms, cx| {
+                AppState::apply(cx, |state| {
+                    state.commit_smooth_wheel_duration_ms(duration_ms)
+                });
+            },
+        )
+    }
+
+    /// The typed-number fields of the thumb-wheel, vertical scroll and
+    /// wheel-duration settings, each committing like its slider.
+    fn scroll_entries(window: &mut Window, cx: &mut Context<Self>) -> ScrollEntries {
+        let settings = AppState::try_read(cx)
+            .map(AppState::app_settings)
+            .cloned()
+            .unwrap_or_default();
+        ScrollEntries {
+            thumbwheel: NumberEntry::new(
+                SliderRange::new(ThumbwheelSensitivity::MIN, ThumbwheelSensitivity::MAX),
+                settings.thumbwheel_sensitivity,
+                window,
+                cx,
+                |value, cx| {
+                    AppState::apply(cx, |state| state.commit_thumbwheel_sensitivity(value));
+                },
+            ),
+            vertical_scroll: NumberEntry::new(
+                SliderRange::new(
+                    VerticalScrollSensitivity::MIN,
+                    VerticalScrollSensitivity::MAX,
+                ),
+                settings.vertical_scroll_sensitivity,
+                window,
+                cx,
+                |value, cx| {
+                    AppState::apply(cx, |state| state.commit_vertical_scroll_sensitivity(value));
+                },
+            ),
+            wheel_duration: NumberEntry::new(
+                SliderRange::new(WheelFeel::DURATION_MS_MIN, WheelFeel::DURATION_MS_MAX),
+                settings.smooth_wheel_duration_ms,
+                window,
+                cx,
+                |value, cx| {
+                    AppState::apply(cx, |state| state.commit_smooth_wheel_duration_ms(value));
+                },
+            ),
+        }
+    }
+
+    fn on_wheel_easing_select(
+        &mut self,
+        _: &Entity<SelectState<Vec<general::WheelEasingOption>>>,
+        event: &SelectEvent<Vec<general::WheelEasingOption>>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let SelectEvent::Confirm(_) = event;
+        if let Some(easing) = self.wheel_easing_select.read(cx).selected_value().copied() {
+            AppState::apply(cx, |state| state.commit_smooth_wheel_easing(easing));
+        }
     }
 
     fn on_language_select(
@@ -426,18 +560,7 @@ impl Render for SettingsView {
             window,
             cx,
         );
-        // A failed write restores AppState's persisted configuration. Re-seat
-        // these independently owned sliders so neither can keep presenting the
-        // rejected value after that rollback.
-        if let Some(settings) = AppState::try_read(cx).map(AppState::app_settings) {
-            let (vertical_scroll, thumbwheel) = (
-                settings.vertical_scroll_sensitivity,
-                settings.thumbwheel_sensitivity,
-            );
-            self.vertical_scroll_sensitivity
-                .sync(vertical_scroll, window, cx);
-            self.thumbwheel_sensitivity.sync(thumbwheel, window, cx);
-        }
+        self.sync_scroll_controls(window, cx);
         let pal = theme::palette(cx);
         let view = cx.entity();
         // Only surface the Camera permission when a webcam is actually present,
@@ -458,9 +581,20 @@ impl Render for SettingsView {
                 group_ix: None,
             })
             .page(general::general_page(
-                general::SensitivitySliders {
-                    vertical_scroll: self.vertical_scroll_sensitivity.slider().clone(),
-                    thumbwheel: self.thumbwheel_sensitivity.slider().clone(),
+                general::ScrollControls {
+                    vertical_scroll: general::SliderWithEntry {
+                        slider: self.vertical_scroll_sensitivity.slider().clone(),
+                        entry: self.scroll_entries.vertical_scroll.input().clone(),
+                    },
+                    thumbwheel: general::SliderWithEntry {
+                        slider: self.thumbwheel_sensitivity.slider().clone(),
+                        entry: self.scroll_entries.thumbwheel.input().clone(),
+                    },
+                    wheel_duration: general::SliderWithEntry {
+                        slider: self.wheel_duration.slider().clone(),
+                        entry: self.scroll_entries.wheel_duration.input().clone(),
+                    },
+                    wheel_easing: self.wheel_easing_select.clone(),
                 },
                 self.momentum_panel.clone(),
                 self.registration_status,

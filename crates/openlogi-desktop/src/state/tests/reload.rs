@@ -146,6 +146,79 @@ fn desktop_switcher_overlay_persists_and_reloads_only_when_changed() {
 }
 
 #[test]
+fn wheel_feel_settings_persist_and_reload_only_when_changed() {
+    type Step = (
+        &'static str,
+        fn(&mut AppState) -> crate::state::events::StateEvents,
+        fn(&openlogi_core::config::AppSettings) -> bool,
+    );
+    use openlogi_core::config::{WheelEasing, WheelFeel};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let (config, file) = ConfigFile::load_from_path(&path).unwrap();
+    let resolver = AssetResolver::new();
+    let (commands, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut state = AppState::new(Sources {
+        persistence: ConfigPersistence::UserFile(file),
+        ..Sources::in_memory(config, &resolver, commands)
+    });
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(crate::services::ipc::Command::LoadConfig(_))
+    ));
+    assert_eq!(state.app_settings().wheel_feel(), WheelFeel::default());
+
+    // Each step changes one setting; the saved file and the agent reload
+    // must follow it, and repeating the step must do neither.
+
+    let steps: [Step; 4] = [
+        (
+            "acceleration",
+            |s| s.commit_scroll_acceleration(false),
+            |a| !a.scroll_acceleration,
+        ),
+        (
+            "easing",
+            |s| s.commit_smooth_wheel_easing(WheelEasing::Linear),
+            |a| a.smooth_wheel_easing == WheelEasing::Linear,
+        ),
+        (
+            "duration",
+            |s| s.commit_smooth_wheel_duration_ms(250),
+            |a| a.smooth_wheel_duration_ms == 250,
+        ),
+        (
+            "duration clamps into range",
+            |s| s.commit_smooth_wheel_duration_ms(9000),
+            |a| a.smooth_wheel_duration_ms == WheelFeel::DURATION_MS_MAX,
+        ),
+    ];
+    for (name, apply, holds) in steps {
+        assert_eq!(apply(&mut state), [StateEvent::SettingsChanged], "{name}");
+        assert!(holds(state.app_settings()), "{name}: in memory");
+        assert!(
+            holds(&Config::load_from_path(&path).unwrap().app_settings),
+            "{name}: on disk"
+        );
+        assert!(
+            matches!(
+                receiver.try_recv(),
+                Ok(crate::services::ipc::Command::ReloadConfig(_))
+            ),
+            "{name}: a save reloads the agent"
+        );
+        assert!(receiver.try_recv().is_err());
+
+        assert_eq!(apply(&mut state), [StateEvent::SettingsChanged], "{name}");
+        assert!(
+            receiver.try_recv().is_err(),
+            "{name}: an unchanged setting must not reload"
+        );
+    }
+}
+
+#[test]
 fn mouse_profile_target_persists_and_reloads_only_when_changed() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);

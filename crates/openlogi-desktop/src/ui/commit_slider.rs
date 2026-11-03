@@ -163,7 +163,7 @@ impl<T: SliderUnit> SliderRange<T> {
     }
 
     /// The value under a raw thumb position, which never leaves the range.
-    fn value_at(self, raw: f32) -> T {
+    pub(crate) fn value_at(self, raw: f32) -> T {
         T::from_slider(raw.clamp(self.min.to_slider(), self.max.to_slider()))
     }
 
