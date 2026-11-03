@@ -278,6 +278,13 @@ pub(super) fn process_input(
         }
         ButtonInput::Up { key, released_at } => {
             if let Some(mut press) = state.release(&key) {
+                if let Some(deadline) = press.behavior.deadline() {
+                    tracing::debug!(
+                        key = ?press.token.key,
+                        shortfall_ms = deadline.saturating_duration_since(released_at).as_millis(),
+                        "long press released: zero shortfall fires the long action, otherwise the short one"
+                    );
+                }
                 if let Some(action) = press.fire_long(released_at) {
                     emit(ButtonRuntimeEvent::Triggered {
                         press: press.clone(),

@@ -32,7 +32,7 @@ use crate::features::binding_editor::{Recording, RecordsShortcut, ShortcutRecord
 use crate::features::keyboard::editors::{PowerUserKind, text_editor_placeholder};
 use crate::features::profiles::{profile_canvas_status, profile_name};
 use crate::services::assets::{GlowGeometry, ResolvedAsset};
-use crate::state::{AppState, BindingLayer, DeviceKey, DeviceRecord, StateEvent};
+use crate::state::{AppOverrides, AppState, BindingLayer, DeviceKey, DeviceRecord, StateEvent};
 use crate::ui::theme::{self, ACCENT_BLUE};
 
 const SIDE_GAP: f32 = 24.;
@@ -102,7 +102,7 @@ struct MouseWorkspaceData<'a> {
     virtual_thumbwheel: bool,
     wheel_hold: &'a BTreeSet<ButtonId>,
     editing_app: Option<String>,
-    overridden: Option<&'a BTreeMap<ButtonId, Action>>,
+    overridden: Option<AppOverrides<'a>>,
     /// Actions the picker offers beyond the catalog.
     extra_actions: &'static [Action],
     /// Catalog actions the picker leaves out.
@@ -541,7 +541,7 @@ impl Render for MouseModelView {
             .copied()
             .filter(|button| {
                 editing_app.is_none()
-                    || !overridden.is_some_and(|overrides| overrides.contains_key(button))
+                    || !overridden.is_some_and(|overrides| overrides.contains_key(*button))
             })
             .collect();
 

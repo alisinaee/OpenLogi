@@ -10,25 +10,92 @@ use super::defaults::default_gesture_binding;
 use super::gesture::GestureDirection;
 
 /// How long a physical button must remain down before its independent long
-/// action fires.
+/// action fires, unless the binding sets its own [`HoldThreshold`].
 pub const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
+
+/// A long press's own hold time in milliseconds: the single owner of the
+/// accepted range. Deserializing a value outside
+/// [`MIN_MS`](Self::MIN_MS)`..=`[`MAX_MS`](Self::MAX_MS) fails, so a runtime
+/// deadline is always one a person can deliberately reach and a stuck button
+/// cannot be mistaken for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u16", into = "u16")]
+pub struct HoldThreshold(u16);
+
+impl HoldThreshold {
+    /// Shortest accepted hold, in milliseconds.
+    pub const MIN_MS: u16 = 200;
+    /// Longest accepted hold, in milliseconds.
+    pub const MAX_MS: u16 = 3000;
+
+    /// The hold time as a [`Duration`].
+    #[must_use]
+    pub fn duration(self) -> Duration {
+        Duration::from_millis(u64::from(self.0))
+    }
+}
+
+impl TryFrom<u16> for HoldThreshold {
+    type Error = String;
+
+    fn try_from(ms: u16) -> Result<Self, Self::Error> {
+        if (Self::MIN_MS..=Self::MAX_MS).contains(&ms) {
+            Ok(Self(ms))
+        } else {
+            Err(format!(
+                "hold_ms must be between {} and {} milliseconds, got {ms}",
+                Self::MIN_MS,
+                Self::MAX_MS
+            ))
+        }
+    }
+}
+
+impl From<HoldThreshold> for u16 {
+    fn from(threshold: HoldThreshold) -> Self {
+        threshold.0
+    }
+}
 
 /// The mutually exclusive actions of a threshold-based button binding.
 ///
 /// `short` fires only on an ordinary release before the threshold. `long`
 /// fires once when the threshold elapses and suppresses `short` for that press.
+/// The threshold is [`LONG_PRESS_THRESHOLD`] unless `hold_ms` overrides it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LongPressBinding {
     short: Action,
     long: Action,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold_ms: Option<HoldThreshold>,
 }
 
 impl LongPressBinding {
     /// Pair the release-before-threshold action with the threshold action.
     #[must_use]
     pub const fn new(short: Action, long: Action) -> Self {
-        Self { short, long }
+        Self {
+            short,
+            long,
+            hold_ms: None,
+        }
+    }
+
+    /// The same pair with its own hold time instead of the default.
+    #[must_use]
+    pub const fn with_hold(mut self, hold: HoldThreshold) -> Self {
+        self.hold_ms = Some(hold);
+        self
+    }
+
+    /// How long the button must stay down before [`long`](Self::long) fires.
+    #[must_use]
+    pub fn threshold(&self) -> Duration {
+        match self.hold_ms {
+            Some(hold) => hold.duration(),
+            None => LONG_PRESS_THRESHOLD,
+        }
     }
 
     /// Action fired by a normal release before the threshold.
@@ -41,6 +108,53 @@ impl LongPressBinding {
     #[must_use]
     pub const fn long(&self) -> &Action {
         &self.long
+    }
+}
+
+/// One button's override inside a per-application profile: a single action,
+/// or a short/long pair with its own hold time. Never a gesture map or a
+/// wheel hold — a per-app override still replaces the whole button.
+///
+/// `#[serde(untagged)]` so a plain action serializes exactly as it did before
+/// this type existed and existing configs round-trip unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PerAppBinding {
+    /// One action, fired on press.
+    Single(Action),
+    /// Independent release-before-threshold and threshold actions.
+    LongPress(LongPressBinding),
+}
+
+impl PerAppBinding {
+    /// The plain-click action: the single action, or a long press's short one.
+    #[must_use]
+    pub fn click_action(&self) -> Action {
+        match self {
+            Self::Single(action) => action.clone(),
+            Self::LongPress(binding) => binding.short().clone(),
+        }
+    }
+
+    /// The binding the runtime dispatches for this override.
+    #[must_use]
+    pub fn to_binding(&self) -> Binding {
+        match self {
+            Self::Single(action) => Binding::Single(action.clone()),
+            Self::LongPress(binding) => Binding::LongPress(binding.clone()),
+        }
+    }
+}
+
+impl From<Action> for PerAppBinding {
+    fn from(action: Action) -> Self {
+        Self::Single(action)
+    }
+}
+
+impl PartialEq<Action> for PerAppBinding {
+    fn eq(&self, other: &Action) -> bool {
+        matches!(self, Self::Single(action) if action == other)
     }
 }
 

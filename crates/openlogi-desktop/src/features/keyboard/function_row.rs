@@ -618,8 +618,7 @@ fn selected_key_action(state: &AppState, target: &KeyTarget) -> Option<Action> {
     if state.editing_app().is_some() {
         state
             .editing_app_overrides()
-            .and_then(|overrides| overrides.get(&button))
-            .cloned()
+            .and_then(|overrides| overrides.get(button))
     } else {
         bound_action(state, target)
     }

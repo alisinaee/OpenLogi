@@ -11,13 +11,14 @@ use std::collections::BTreeMap;
 
 use super::Config;
 use crate::app::{overlay_for, profile_key_for};
-use crate::binding::{Action, Binding, ButtonId};
+use crate::binding::{Action, Binding, ButtonId, PerAppBinding};
 
 impl Config {
     /// Resolve the effective binding map for `device_key`, overlaying the
     /// per-app entry for `bundle_id` (if any) on top of the global per-device
     /// `bindings`. A per-app override replaces the whole button with a
-    /// [`Binding::Single`]; everything else falls through.
+    /// [`Binding::Single`] or a [`Binding::LongPress`] (with its own hold
+    /// time); everything else falls through.
     ///
     /// Returns an empty map when the device has no recorded bindings yet.
     /// Callers (the GUI / hook) layer their own defaults on top.
@@ -35,7 +36,7 @@ impl Config {
             && let Some(overlay) = overlay_for(&device.per_app_bindings, &self.apps, bid)
         {
             for (k, v) in overlay {
-                out.insert(*k, Binding::Single(v.clone()));
+                out.insert(*k, v.to_binding());
             }
         }
         out
@@ -60,7 +61,7 @@ impl Config {
             .or_default();
         match action {
             Some(a) => {
-                entry.insert(button, a);
+                entry.insert(button, PerAppBinding::Single(a));
             }
             None => {
                 entry.remove(&button);
@@ -85,7 +86,7 @@ impl Config {
         &self,
         device_key: &str,
         app: &str,
-    ) -> Option<&BTreeMap<ButtonId, Action>> {
+    ) -> Option<&BTreeMap<ButtonId, PerAppBinding>> {
         self.devices
             .get(device_key)?
             .per_app_bindings

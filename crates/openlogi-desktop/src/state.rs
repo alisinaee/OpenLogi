@@ -76,6 +76,7 @@ mod action_ring;
 mod agent;
 mod backlight;
 mod bindings;
+pub(crate) use bindings::AppOverrides;
 pub use bindings::BindingLayer;
 mod camera;
 mod config;

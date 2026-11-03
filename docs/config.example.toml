@@ -71,6 +71,7 @@ Forward = { TapKeyHoldingModifiers = "Cmd+Tab" }
 # Hold the whole chord for exactly as long as the physical button is held.
 MiddleClick = { HoldShortcut = "Ctrl+Space" }
 # Release before 500 ms runs `short`; reaching 500 ms runs `long` once.
+# `hold_ms` (200-3000) sets a different hold time.
 DpiToggle = { short = "ShowDesktop", long = "MissionControl" }
 # On a mouse without a thumb wheel, hold Back and turn the main wheel to scroll
 # sideways; a click that did not turn the wheel still runs `click`:
@@ -88,6 +89,12 @@ Right = "NextDesktop"
 
 [devices."receiver:aabbccdd:slot:1".per_app_bindings."com.microsoft.VSCode"]
 Back = "Undo"
+
+# Arc: a quick press stays browser back/forward; holding for one second moves
+# to the previous/next space.
+[devices."receiver:aabbccdd:slot:1".per_app_bindings."company.thebrowser.Browser"]
+Back = { short = "BrowserBack", long = { CustomShortcut = "Cmd+Alt+Left" }, hold_ms = 1000 }
+Forward = { short = "BrowserForward", long = { CustomShortcut = "Cmd+Alt+Right" }, hold_ms = 1000 }
 
 [devices."receiver:aabbccdd:slot:1".per_app_bindings."exe:sharex.exe"]
 MiddleClick = { CustomShortcut = "F1" }

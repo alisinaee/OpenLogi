@@ -763,6 +763,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_per_app_long_press_diverts_back_only_while_that_app_is_in_front() {
+        use openlogi_core::binding::{HoldThreshold, PerAppBinding};
+        const ARC: &str = "company.thebrowser.Browser";
+        let hold = HoldThreshold::try_from(1000).expect("in range");
+        let press =
+            LongPressBinding::new(Action::BrowserBack, Action::MissionControl).with_hold(hold);
+        let mut cfg = Config::default();
+        cfg.devices
+            .entry("2b01a".into())
+            .or_default()
+            .per_app_bindings
+            .entry(ARC.into())
+            .or_default()
+            .insert(ButtonId::Back, PerAppBinding::LongPress(press.clone()));
+        let diverts_back = |plan: &DeviceCapturePlan| {
+            plan.target
+                .spec
+                .divert_buttons
+                .iter()
+                .any(|&(_, button)| button == ButtonId::Back)
+        };
+
+        let in_arc = plan_for_device(&cfg, "2b01a", route(), Some(ARC), 0, true);
+        assert!(diverts_back(&in_arc), "Arc's hold needs both edges");
+        assert_eq!(
+            in_arc.dispatch.bindings.get(&ButtonId::Back),
+            Some(&Binding::LongPress(press))
+        );
+        for app in [None, Some("com.apple.Safari")] {
+            let elsewhere = plan_for_device(&cfg, "2b01a", route(), app, 0, true);
+            assert!(!diverts_back(&elsewhere), "{app:?} keeps the native button");
+        }
+    }
+
     fn wheel_diverts(plan: &DeviceCapturePlan, button: ButtonId) -> bool {
         plan.target
             .spec

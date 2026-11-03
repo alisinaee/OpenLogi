@@ -11,7 +11,9 @@ use super::settings::{
     CameraControls, CameraStreamMode, GestureOwner, LightSettings, Lighting, MomentumScrolling,
     OnboardMemory, ScrollResolution, SmartShift, ThumbwheelSensitivity, deserialize_gesture_owner,
 };
-use crate::binding::{Action, ActionRingConfig, Binding, ButtonId, GestureDirection, KeypadPage};
+use crate::binding::{
+    Action, ActionRingConfig, Binding, ButtonId, GestureDirection, KeypadPage, PerAppBinding,
+};
 use crate::device::{Capabilities, DeviceKind, DeviceModelInfo, LightCapabilities};
 use crate::hid::{DisableKeysMask, Dpi, PointerSpeed, ReportRate};
 
@@ -240,11 +242,12 @@ pub struct DeviceConfig {
     /// Per-application binding overlays (P1.4). Keyed by the application
     /// identifier defined by [`ForegroundApp::id`](crate::app::ForegroundApp::id).
     /// When the foreground app's id matches a key here, these bindings take
-    /// precedence. Other buttons use `bindings`. Deliberately `Action`-valued
-    /// (not `Binding`): a per-app override replaces the whole button with one
-    /// action, never a per-direction gesture overlay.
+    /// precedence. Other buttons use `bindings`. Deliberately
+    /// [`PerAppBinding`]-valued (not `Binding`): a per-app override replaces
+    /// the whole button with one action or a short/long pair, never a
+    /// per-direction gesture overlay.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub per_app_bindings: BTreeMap<String, BTreeMap<ButtonId, Action>>,
+    pub per_app_bindings: BTreeMap<String, BTreeMap<ButtonId, PerAppBinding>>,
     /// Host-rendered Actions Ring settings and complete per-application layouts.
     #[serde(default, skip_serializing_if = "ActionRingConfig::is_default")]
     pub action_ring: ActionRingConfig,
@@ -600,7 +603,7 @@ struct RawDeviceConfig {
     #[serde(default)]
     gesture_bindings: BTreeMap<GestureDirection, Action>,
     #[serde(default, deserialize_with = "deserialize_button_maps_by_app")]
-    per_app_bindings: BTreeMap<String, BTreeMap<ButtonId, Action>>,
+    per_app_bindings: BTreeMap<String, BTreeMap<ButtonId, PerAppBinding>>,
     #[serde(default)]
     action_ring: ActionRingConfig,
     #[serde(default, deserialize_with = "deserialize_dpi_presets")]

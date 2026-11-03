@@ -207,7 +207,7 @@ fn a_binding_committed_in_a_per_app_profile_leaves_the_global_one_alone() {
         state
             .config
             .per_app_overrides(KNOWN_MOUSE_KEY, "com.apple.Safari"),
-        Some(&BTreeMap::from([(ButtonId::Back, Action::Undo)]))
+        Some(&BTreeMap::from([(ButtonId::Back, Action::Undo.into())]))
     );
     assert!(
         state.config.stored_bindings(KNOWN_MOUSE_KEY).is_empty(),
@@ -282,7 +282,7 @@ fn removing_an_action_ring_profile_leaves_button_overrides_untouched() {
         state
             .config
             .per_app_overrides(KNOWN_MOUSE_KEY, "com.apple.Safari"),
-        Some(&BTreeMap::from([(ButtonId::Back, Action::Undo)]))
+        Some(&BTreeMap::from([(ButtonId::Back, Action::Undo.into())]))
     );
     assert_eq!(
         state.editing_app(),

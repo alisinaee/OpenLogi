@@ -566,7 +566,7 @@ mod tests {
             .per_app_bindings
             .insert(
                 "app".into(),
-                BTreeMap::from([(slot(3, GridKey::TopLeft), Action::Cut)]),
+                BTreeMap::from([(slot(3, GridKey::TopLeft), Action::Cut.into())]),
             );
 
         cfg.set_keypad_pages("keypad", KeypadPage::new(2).unwrap());

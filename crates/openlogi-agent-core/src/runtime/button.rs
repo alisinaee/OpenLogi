@@ -14,7 +14,7 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
-use openlogi_core::binding::{Action, Binding, ButtonId, LONG_PRESS_THRESHOLD};
+use openlogi_core::binding::{Action, Binding, ButtonId};
 use tracing::warn;
 
 use super::ActionDispatchTarget;
@@ -207,7 +207,7 @@ impl PressBehavior {
             Some(Binding::LongPress(binding)) => Self::LongPressPending {
                 short: binding.short().clone(),
                 long: binding.long().clone(),
-                deadline: pressed_at + LONG_PRESS_THRESHOLD,
+                deadline: pressed_at + binding.threshold(),
             },
             Some(Binding::WheelHold(binding)) => Self::WheelHoldPending {
                 click: binding.click().clone(),
@@ -662,6 +662,18 @@ impl ButtonInputHandle {
         target: ActionDispatchTarget,
     ) -> Option<PressToken> {
         let generation = self.generation.load(Ordering::Acquire);
+        // Which capture path took the press, and whether it is timed: the two
+        // facts that tell a missing long press from a path that never saw it.
+        tracing::debug!(
+            ?source,
+            ?button,
+            long_press = matches!(binding, Some(Binding::LongPress(_))),
+            hold_ms = binding.and_then(|b| match b {
+                Binding::LongPress(press) => Some(press.threshold().as_millis()),
+                _ => None,
+            }),
+            "button press accepted"
+        );
         let press = self.new_press(
             PressKey::new(source, button),
             PressBehavior::new(binding, Instant::now()),

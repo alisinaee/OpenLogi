@@ -25,7 +25,7 @@ use crate::features::binding_editor::{
     ActionOffer, GESTURE_BUTTON_ICON, PickFn, action_icon_path, action_rows_with,
     application_editor, command_editor, editor_section, gesture_direction_icon,
 };
-use crate::state::AppState;
+use crate::state::{AppOverrides, AppState};
 use crate::ui::action::localized_action_label;
 use crate::ui::components::{MenuRow, Toggle, control_button, control_input, toggle_row};
 use crate::ui::theme::{self, ACCENT_BLUE, Palette, Typography as _};
@@ -48,7 +48,7 @@ pub(super) struct BindingInspectorData<'a> {
     /// Buttons that hold the wheel to scroll sideways, from the global profile.
     pub wheel_hold: &'a BTreeSet<ButtonId>,
     pub editing_app: Option<&'a str>,
-    pub overridden: Option<&'a BTreeMap<ButtonId, Action>>,
+    pub overridden: Option<AppOverrides<'a>>,
     /// The haptic panel's press-force row, present only while
     /// [`ForceSensingFacts::current`](super::force_sensing::ForceSensingFacts::current)
     /// says it shows.
@@ -121,7 +121,7 @@ pub(super) fn binding_inspector(
     let body = match data.selected {
         None => empty_inspector(
             data.editing_app,
-            data.overridden.map_or(0, BTreeMap::len),
+            data.overridden.map_or(0, AppOverrides::len),
             pal,
         ),
         Some(MouseControlId::ThumbwheelRotation) => thumbwheel_inspector(
@@ -194,7 +194,7 @@ fn button_inspector(
     let gesture_map = data.gesture_maps.get(&button);
     let overridden = data
         .overridden
-        .is_some_and(|overrides| overrides.contains_key(&button));
+        .is_some_and(|overrides| overrides.contains_key(button));
     if data.editing_app.is_none()
         && let Some(gesture_map) = gesture_map
     {
@@ -596,7 +596,7 @@ fn can_enable_gestures(button: ButtonId, editing_app: Option<&str>) -> bool {
 fn thumbwheel_inspector(
     bindings: &BTreeMap<ButtonId, Action>,
     editing_app: Option<&str>,
-    overridden: Option<&BTreeMap<ButtonId, Action>>,
+    overridden: Option<AppOverrides<'_>>,
     picker: ActionPickerContext<'_>,
     pal: Palette,
 ) -> gpui::Div {
@@ -610,8 +610,8 @@ fn thumbwheel_inspector(
         .unwrap_or_else(|| default_binding(ButtonId::ThumbwheelScrollUp));
     let current = ThumbwheelPreset::recognize(&backward, &forward);
     let is_overridden = overridden.is_some_and(|overrides| {
-        overrides.contains_key(&ButtonId::ThumbwheelScrollDown)
-            || overrides.contains_key(&ButtonId::ThumbwheelScrollUp)
+        overrides.contains_key(ButtonId::ThumbwheelScrollDown)
+            || overrides.contains_key(ButtonId::ThumbwheelScrollUp)
     });
     let status = match (editing_app, is_overridden) {
         (Some(app), true) => tr!("actions.overridden_in_app", app => app.to_string()),

@@ -455,7 +455,7 @@ impl Config {
                     .per_app_bindings
                     .values()
                     .flat_map(BTreeMap::values)
-                    .any(|action| *action == Action::GShift)
+                    .any(|binding| *binding == Action::GShift)
         })
     }
 
@@ -486,7 +486,7 @@ impl Config {
                 .per_app_bindings
                 .values()
                 .flatten()
-                .any(|(b, action)| customized(b, &Binding::Single(action.clone())));
+                .any(|(b, binding)| customized(b, &binding.to_binding()));
         needs_host.then_some(OnboardMemory::Off)
     }
 

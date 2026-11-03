@@ -53,8 +53,8 @@ fn assert_copy_selection(cx: &mut gpui::VisualTestContext, inherited: bool) {
         assert_eq!(
             state
                 .editing_app_overrides()
-                .and_then(|rows| rows.get(&CALCULATOR)),
-            (!inherited).then_some(&Action::Copy),
+                .and_then(|rows| rows.get(CALCULATOR)),
+            (!inherited).then_some(Action::Copy),
         );
     });
 }

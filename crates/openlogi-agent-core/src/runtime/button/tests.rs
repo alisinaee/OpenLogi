@@ -2,7 +2,9 @@
 
 use std::time::Instant;
 
-use openlogi_core::binding::{LongPressBinding, WheelHoldBinding};
+use openlogi_core::binding::{
+    HoldThreshold, LONG_PRESS_THRESHOLD, LongPressBinding, WheelHoldBinding,
+};
 
 use super::*;
 use crate::runtime::PointerPress;
@@ -1337,4 +1339,33 @@ fn a_press_says_whether_the_os_hook_captured_it() {
     assert!(hook.captured_by_os_hook());
     assert!(!hidpp.captured_by_os_hook());
     assert!(owner.shutdown());
+}
+
+#[test]
+fn a_long_press_arms_its_own_hold_time_instead_of_the_default() {
+    let pressed_at = Instant::now();
+    let hold = HoldThreshold::try_from(1000).expect("in range");
+    let custom =
+        Binding::LongPress(LongPressBinding::new(Action::Copy, Action::Paste).with_hold(hold));
+    let plain = Binding::LongPress(LongPressBinding::new(Action::Copy, Action::Paste));
+
+    assert_eq!(
+        PressBehavior::new(Some(&custom), pressed_at).deadline(),
+        Some(pressed_at + Duration::from_millis(1000))
+    );
+    assert_eq!(
+        PressBehavior::new(Some(&plain), pressed_at).deadline(),
+        Some(pressed_at + LONG_PRESS_THRESHOLD)
+    );
+
+    let mut behavior = PressBehavior::new(Some(&custom), pressed_at);
+    assert_eq!(
+        behavior.fire_long(pressed_at + LONG_PRESS_THRESHOLD),
+        None,
+        "the default hold time must not fire a 1000 ms long press"
+    );
+    assert_eq!(
+        behavior.fire_long(pressed_at + Duration::from_millis(1000)),
+        Some(Action::Paste)
+    );
 }

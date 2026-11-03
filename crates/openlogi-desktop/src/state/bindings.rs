@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use openlogi_core::binding::{
     Action, Binding, ButtonId, GamingLayout, GestureDirection, KeypadPage, LongPressBinding,
-    WheelHoldBinding,
+    PerAppBinding, WheelHoldBinding,
 };
 use openlogi_core::bindings::{
     bindings_for, button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
@@ -17,6 +17,43 @@ use crate::state::devices::DeviceRecord;
 
 use super::events::StateEvents;
 use super::{AppState, DeviceKey, StateEvent};
+
+/// The open profile's overrides as the panel reads them: which buttons are
+/// overridden and the plain-click action each carries. A per-app long press
+/// reads as its short action; its hold is edited in the config file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppOverrides<'a> {
+    /// The G-Shift layer.
+    Actions(&'a BTreeMap<ButtonId, Action>),
+    /// A per-application profile.
+    PerApp(&'a BTreeMap<ButtonId, PerAppBinding>),
+}
+
+impl AppOverrides<'_> {
+    /// Whether `button` is overridden.
+    pub(crate) fn contains_key(self, button: ButtonId) -> bool {
+        match self {
+            Self::Actions(map) => map.contains_key(&button),
+            Self::PerApp(map) => map.contains_key(&button),
+        }
+    }
+
+    /// How many buttons are overridden.
+    pub(crate) fn len(self) -> usize {
+        match self {
+            Self::Actions(map) => map.len(),
+            Self::PerApp(map) => map.len(),
+        }
+    }
+
+    /// The plain-click action `button` is overridden to.
+    pub(crate) fn get(self, button: ButtonId) -> Option<Action> {
+        match self {
+            Self::Actions(map) => map.get(&button).cloned(),
+            Self::PerApp(map) => map.get(&button).map(PerAppBinding::click_action),
+        }
+    }
+}
 
 /// The per-app profile or G-Shift layer being edited, tied to the device it
 /// was opened for so it never carries over to another mouse.
@@ -525,15 +562,16 @@ impl AppState {
     /// apart from a binding inherited from the global profile. `None` in the
     /// global profile, where there is nothing to distinguish.
     #[must_use]
-    pub fn editing_app_overrides(&self) -> Option<&BTreeMap<ButtonId, Action>> {
+    pub(crate) fn editing_app_overrides(&self) -> Option<AppOverrides<'_>> {
         let key = self
             .current_record()
             .and_then(DeviceRecord::persistent_config_key)?;
         if self.binding_layer() == BindingLayer::GShift {
-            return self.config.gshift_overrides(key);
+            return self.config.gshift_overrides(key).map(AppOverrides::Actions);
         }
         self.editing_app()
             .and_then(|app| self.config.per_app_overrides(key, app))
+            .map(AppOverrides::PerApp)
     }
 
     /// Apply one paired thumb-wheel preset atomically. Both directional

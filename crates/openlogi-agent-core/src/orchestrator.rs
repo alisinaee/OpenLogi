@@ -2509,7 +2509,7 @@ fn binds_keys_in_some_profile(config: &Config, config_key: &str) -> bool {
             .any(|overrides| {
                 let overrides = overrides
                     .iter()
-                    .map(|(button, action)| (*button, Binding::Single(action.clone())))
+                    .map(|(button, binding)| (*button, binding.to_binding()))
                     .collect();
                 !keyboard_divert_set(&overrides).captures_nothing()
             })

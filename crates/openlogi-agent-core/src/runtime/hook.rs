@@ -321,6 +321,15 @@ fn handle_button(
     if echoed {
         return EventDisposition::Suppress;
     }
+    if pressed {
+        debug!(
+            ?id,
+            diverted,
+            long_press = matches!(binding, Some(Binding::LongPress(_))),
+            gesture = is_gesture,
+            "os hook press: a diverted button is the HID++ session's, otherwise the hook times it"
+        );
+    }
     let action_target = if pressed {
         ActionDispatchTarget::for_pointer(pointer, capture_safari_pid)
     } else {

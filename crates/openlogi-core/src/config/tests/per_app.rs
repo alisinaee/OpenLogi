@@ -1,6 +1,7 @@
 //! Per-app overlays and the application selectors that pick them.
 
 use super::*;
+use crate::binding::{LongPressBinding, PerAppBinding};
 
 #[test]
 fn per_app_overlay_takes_precedence() {
@@ -377,4 +378,87 @@ PLATFORM = ["com.example.editor", "com.example.editorbeta"]
     }
     let reloaded = Config::load_from_path(&path).expect("saved config loads");
     assert_eq!(reloaded.apps, config.apps);
+}
+
+const ARC: &str = "company.thebrowser.Browser";
+
+const ARC_HOLD_CONFIG: &str = r#"schema_version = 9
+[devices.mouse.bindings]
+Back = "BrowserBack"
+Forward = "BrowserForward"
+[devices.mouse.per_app_bindings."company.thebrowser.Browser"]
+Back = { short = "BrowserBack", long = { CustomShortcut = "Cmd+Option+Left" }, hold_ms = 1000 }
+Forward = "BrowserForward"
+"#;
+
+#[test]
+fn a_per_app_long_press_with_its_own_hold_time_round_trips_beside_plain_actions() {
+    let config = load(ARC_HOLD_CONFIG).expect("per-app long press must load");
+    let overrides = config.per_app_overrides("mouse", ARC).expect("arc profile");
+    assert_eq!(overrides[&ButtonId::Forward], Action::BrowserForward);
+    let Some(PerAppBinding::LongPress(press)) = overrides.get(&ButtonId::Back) else {
+        panic!("Back must load as a long press");
+    };
+    assert_eq!(press.threshold(), std::time::Duration::from_millis(1000));
+    assert_eq!(press.short(), &Action::BrowserBack);
+
+    let body = toml::to_string_pretty(&config).expect("serialize");
+    assert!(
+        body.contains("hold_ms = 1000"),
+        "the hold time must survive: {body}"
+    );
+    assert!(
+        body.contains("Forward = \"BrowserForward\""),
+        "a plain per-app action keeps its bare form: {body}"
+    );
+    let reloaded = load(&body).expect("round-trip");
+    assert_eq!(reloaded.devices["mouse"], config.devices["mouse"]);
+}
+
+#[test]
+fn a_plain_per_app_action_serializes_byte_stable() {
+    let source =
+        "schema_version = 9\n[devices.mouse.per_app_bindings.\"app:x\"]\nBack = \"Undo\"\n";
+    let mut cfg = Config::default();
+    cfg.set_per_app_binding("mouse", "app:x", ButtonId::Back, Some(Action::Undo));
+    let body = toml::to_string(&cfg).expect("serialize");
+    assert!(body.contains("[devices.mouse.per_app_bindings.\"app:x\"]\nBack = \"Undo\"\n"));
+    assert!(load(source).is_err(), "the alias is undefined, as before");
+}
+
+#[test]
+fn effective_bindings_select_the_per_app_long_press_only_for_that_app() {
+    let config = load(ARC_HOLD_CONFIG).expect("load");
+    let arc = config.effective_bindings("mouse", Some(ARC));
+    let Some(Binding::LongPress(press)) = arc.get(&ButtonId::Back) else {
+        panic!("Arc's Back is a long press");
+    };
+    assert_eq!(press.threshold(), std::time::Duration::from_millis(1000));
+    assert_eq!(
+        arc.get(&ButtonId::Forward),
+        Some(&Binding::Single(Action::BrowserForward))
+    );
+    let elsewhere = config.effective_bindings("mouse", Some("com.apple.Safari"));
+    assert_eq!(
+        elsewhere.get(&ButtonId::Back),
+        Some(&Binding::Single(Action::BrowserBack))
+    );
+}
+
+#[test]
+fn a_hold_time_outside_the_accepted_range_is_rejected() {
+    for ms in [0, 199, 3001, 60000] {
+        let source = ARC_HOLD_CONFIG.replace("hold_ms = 1000", &format!("hold_ms = {ms}"));
+        assert!(load(&source).is_err(), "hold_ms = {ms} must not load");
+    }
+    for ms in [200, 3000] {
+        let source = ARC_HOLD_CONFIG.replace("hold_ms = 1000", &format!("hold_ms = {ms}"));
+        load(&source).expect("boundary hold_ms must load");
+    }
+}
+
+#[test]
+fn a_long_press_without_hold_ms_keeps_the_default_threshold() {
+    let press = LongPressBinding::new(Action::Copy, Action::Paste);
+    assert_eq!(press.threshold(), crate::binding::LONG_PRESS_THRESHOLD);
 }

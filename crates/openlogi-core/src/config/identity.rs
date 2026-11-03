@@ -929,7 +929,7 @@ mod tests {
         let legacy = DeviceConfig {
             per_app_bindings: std::collections::BTreeMap::from([(
                 "com.example.App".to_string(),
-                std::collections::BTreeMap::from([(ButtonId::MiddleClick, Action::Copy)]),
+                std::collections::BTreeMap::from([(ButtonId::MiddleClick, Action::Copy.into())]),
             )]),
             ..DeviceConfig::default()
         };
@@ -948,7 +948,7 @@ mod tests {
             device.per_app_bindings.get("com.example.App"),
             Some(&std::collections::BTreeMap::from([(
                 ButtonId::MiddleClick,
-                Action::Copy
+                Action::Copy.into()
             )])),
             "the app overlay survives adoption"
         );

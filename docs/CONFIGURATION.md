@@ -194,7 +194,7 @@ Common device fields are:
   To undo an older GUI's Native selection that saved `None`, select Native again;
   existing `None` entries are not migrated because they may be intentional.
   Naming one control under both spellings in the same table is an error, not a merge
-- `per_app_bindings`: sparse action overlays keyed by macOS bundle id (or the
+- `per_app_bindings`: sparse action (or short/long pair) overlays keyed by macOS bundle id (or the
   exact executable path for applications without a bundle id), Linux application
   id, exact lower-cased Windows executable path, or `exe:<filename>.exe`. macOS
   paths retain their original spelling and case. The Buttons panel edits these
@@ -513,18 +513,41 @@ another button is already holding the same key through `HoldShortcut`, the tap
 is skipped and only the modifiers go down, so that button keeps its key held.
 
 A `{ short = ..., long = ... }` binding waits for the button's outcome instead
-of firing on press. Releasing before 500 ms fires `short`; keeping the button
-down for 500 ms fires `long` exactly once, and the later release does not also
+of firing on press. Releasing before the hold time fires `short`; keeping the
+button down that long fires `long` exactly once, and the later release does not also
 fire `short`. If capture is interrupted, the binding changes, or the agent
 shuts down before either outcome, neither action fires. A source that can only
 report an instantaneous button pulse falls back to `short`. `long` may itself
-be a `HoldShortcut`, in which case its chord stays down from the 500 ms
-threshold until the physical release.
+be a `HoldShortcut`, in which case its chord stays down from the hold time
+until the physical release.
 
-Long-press pairs currently apply to global device `bindings` and are authored
-in TOML. The GUI presents their `short` action; changing that button in the GUI
-replaces the whole pair with the selected single action. `per_app_bindings` and
-`keyboard.bindings` remain single-action maps.
+The hold time is 500 ms unless the pair sets `hold_ms`, a whole number of
+milliseconds from 200 to 3000. Anything outside that range makes the config
+fail to load:
+
+```toml
+DpiToggle = { short = "ShowDesktop", long = "MissionControl", hold_ms = 1000 }
+```
+
+Long-press pairs apply to global device `bindings` and to the values of
+`per_app_bindings`, and are authored in TOML. A per-app value is either a plain
+action or a `{ short, long, hold_ms }` table; a plain action is stored exactly
+as before. The pair is in force only while that application is the one the
+pointer or focus selects, and the button is captured only then. For example,
+in Arc a quick press of Back or Forward stays a browser back or forward, and
+holding the button for one second moves to the previous or next space:
+
+```toml
+[devices."<physical-key>".per_app_bindings."company.thebrowser.Browser"]
+Back = { short = "BrowserBack", long = { CustomShortcut = "Cmd+Alt+Left" }, hold_ms = 1000 }
+Forward = { short = "BrowserForward", long = { CustomShortcut = "Cmd+Alt+Right" }, hold_ms = 1000 }
+```
+
+The GUI presents a pair's `short` action; changing that button in the GUI
+replaces the whole pair with the selected single action. `keyboard.bindings`
+remains a single-action map. With `RUST_LOG=openlogi_agent_core=debug` the agent
+logs which path accepted each press and how far a released press was from its
+hold time.
 
 A wheel-hold binding on `Back` or `Forward` turns the main scroll wheel into a
 virtual thumb wheel while the button is held, as Logi Options+ offers on mice
