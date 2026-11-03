@@ -85,6 +85,8 @@ lock_key_notifications_description = "Bir klavye Caps Lock, Num Lock veya Scroll
 lock_key_notifications_description_macos = "Bir klavye Caps Lock'u açtığında ya da kapattığında ekranda kısa süre göster."
 animate_desktop_switch = "Masaüstü geçişini canlandır"
 animate_desktop_switch_description = "Önceki Masaüstü ve Sonraki Masaüstü, üç parmakla kaydırma gibi yandaki masaüstüne kayar. Anında geçmek için kapatın."
+show_desktop_switcher = "Show desktop switcher"
+show_desktop_switcher_description = "Briefly show the desktop switcher overlay after Previous Desktop and Next Desktop."
 openlogi = "OpenLogi"
 
 [device]

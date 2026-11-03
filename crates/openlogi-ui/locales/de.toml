@@ -85,6 +85,8 @@ lock_key_notifications_description = "Kurz auf dem Bildschirm anzeigen, wenn ein
 lock_key_notifications_description_macos = "Kurz auf dem Bildschirm anzeigen, wenn eine Tastatur die Feststelltaste ein- oder ausschaltet."
 animate_desktop_switch = "Schreibtischwechsel animieren"
 animate_desktop_switch_description = "Vorheriger Schreibtisch und Nächster Schreibtisch gleiten wie beim Streichen mit drei Fingern zum benachbarten Schreibtisch. Ausschalten, um sofort zu wechseln."
+show_desktop_switcher = "Show desktop switcher"
+show_desktop_switcher_description = "Briefly show the desktop switcher overlay after Previous Desktop and Next Desktop."
 openlogi = "OpenLogi"
 
 [device]

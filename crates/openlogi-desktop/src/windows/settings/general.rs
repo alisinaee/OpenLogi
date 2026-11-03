@@ -41,6 +41,7 @@ pub(super) fn general_page(
             vertical_scroll,
             VerticalScrollSensitivity::MAX,
             VerticalScrollSensitivity::DEFAULT,
+            VerticalScrollSensitivity::scroll_multiplier,
         ))
         .item(sensitivity_item(
             tr!("pointer.thumb_wheel_sensitivity"),
@@ -48,11 +49,14 @@ pub(super) fn general_page(
             thumbwheel,
             ThumbwheelSensitivity::MAX,
             ThumbwheelSensitivity::DEFAULT,
+            ThumbwheelSensitivity::scroll_multiplier,
         ));
     // Only macOS animates a desktop switch, so only macOS shows the switch.
     // `cfg!` keeps the item and its setter compiled, and used, everywhere.
     let group = if cfg!(target_os = "macos") {
-        group.item(animate_desktop_switch_item())
+        group
+            .item(animate_desktop_switch_item())
+            .item(show_desktop_switcher_item())
     } else {
         group
     };
@@ -173,6 +177,20 @@ fn animate_desktop_switch_item() -> SettingItem {
     .description(tr!("app.animate_desktop_switch_description"))
 }
 
+/// The switch for the overlay shown after Previous/Next Desktop.
+fn show_desktop_switcher_item() -> SettingItem {
+    SettingItem::new(
+        tr!("app.show_desktop_switcher"),
+        SettingField::switch(
+            |cx| AppState::try_read(cx).is_some_and(|s| s.app_settings().show_desktop_switcher),
+            |enabled, cx| {
+                AppState::apply(cx, |state| state.commit_show_desktop_switcher(enabled));
+            },
+        ),
+    )
+    .description(tr!("app.show_desktop_switcher_description"))
+}
+
 /// The switch for the overlay's low-battery notices.
 fn low_battery_notifications_item() -> SettingItem {
     SettingItem::new(
@@ -217,13 +235,17 @@ fn sensitivity_item<T: SliderUnit + std::fmt::Display>(
     slider: Entity<SliderState>,
     max: T,
     default: T,
+    multiplier: fn(T) -> f64,
 ) -> SettingItem {
     SettingItem::render({
         let (title, description) = (title.clone(), description.clone());
         move |_, _, cx| {
             let value = T::from_slider(slider.read(cx).value().start());
             SliderRow::new(title.clone(), Slider::new(&slider).horizontal())
-                .value(value.to_string(), [max.to_string()])
+                .value(
+                    format!("{value} ({:.1}\u{d7})", multiplier(value)),
+                    [format!("{max} ({:.1}\u{d7})", multiplier(max))],
+                )
                 .when(value == default, |row| row.marker(tr!("common.default")))
                 .description(description.clone())
         }
