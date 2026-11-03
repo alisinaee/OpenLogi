@@ -15,6 +15,8 @@
 #![deny(missing_docs)]
 
 pub mod action_ring;
+#[cfg(feature = "fs")]
+pub mod agent_skill;
 pub mod app;
 pub mod binding;
 pub mod bindings;

@@ -3,7 +3,7 @@
 //! directory.
 //!
 //! This module is the single owner of where the skill lives and how it is
-//! written. The `openlogi agent-skill` command and, later, the desktop app's
+//! written. The `openlogi agent-skill` command and the desktop app's
 //! install button both call [`install`] / [`uninstall`] with a
 //! [`SkillTarget`]; nothing else knows the layout.
 
@@ -106,7 +106,7 @@ impl std::error::Error for SkillError {}
 pub fn skill_path(target: &SkillTarget) -> Result<PathBuf, SkillError> {
     let claude_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
     skill_path_with(target, claude_dir, || {
-        openlogi_core::paths::home_dir().map_err(|error| error.to_string())
+        crate::paths::home_dir().map_err(|error| error.to_string())
     })
 }
 
@@ -180,6 +180,30 @@ pub fn uninstall_at(path: &Path, force: bool) -> Result<Outcome, SkillError> {
         let _ = fs::remove_dir(parent);
     }
     Ok(Outcome::Removed)
+}
+
+/// What is on disk at a skill path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    /// No `SKILL.md` there.
+    Absent,
+    /// Exactly the bundled skill.
+    Current,
+    /// A different `SKILL.md` (an older release, or the user's own).
+    Differs,
+}
+
+/// Whether the skill is installed at `path`.
+///
+/// # Errors
+///
+/// [`SkillError::Io`] when the file exists but cannot be read.
+pub fn presence_at(path: &Path) -> Result<Presence, SkillError> {
+    Ok(match read_existing(path)?.as_deref() {
+        None => Presence::Absent,
+        Some(text) if text == SKILL_MD => Presence::Current,
+        Some(_) => Presence::Differs,
+    })
 }
 
 /// Install the skill for `target`; the call the desktop app should make.

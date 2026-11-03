@@ -605,6 +605,27 @@ device_scanning_is_unavailable = "La búsqueda de dispositivos no está disponib
 device_scan_failure_description = "El agente en segundo plano no pudo buscar dispositivos: consulta su registro para más detalles."
 agent_restarted_during_pairing = "El agente en segundo plano se ha reiniciado. Vuelve a intentar el emparejamiento."
 
+[ai_agent]
+ai_agent = "AI agent"
+claude_code_skill = "Claude Code skill"
+ai_agent_description = "Lets AI coding agents control OpenLogi through the `openlogi` command line."
+skill_checking = "Checking…"
+skill_installed_tag = "Installed"
+skill_installed = "Installed at %{path}"
+skill_not_installed = "Not installed. It will be added at %{path}"
+skill_differs_tag = "Modified"
+skill_differs = "A different skill file is at %{path}"
+skill_path_unavailable = "Can't locate the skill folder: %{error}"
+skill_install = "Install"
+skill_reinstall = "Reinstall"
+skill_remove = "Remove"
+skill_installed_done = "Skill installed."
+skill_already_current = "Skill is already up to date."
+skill_replaced_done = "Skill reinstalled."
+skill_removed_done = "Skill removed."
+skill_nothing_to_remove = "There was nothing to remove."
+skill_failed = "Failed: %{error}"
+
 [updates]
 check_for_updates_dialog = "Buscar actualizaciones…"
 download_install = "Descargar e instalar"

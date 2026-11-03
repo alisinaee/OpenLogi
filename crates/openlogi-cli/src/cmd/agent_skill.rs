@@ -12,7 +12,7 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
 use super::api::{ApiError, envelope};
-use crate::agent_skill::{self, SKILL_MD, SkillError, SkillTarget};
+use openlogi_core::agent_skill::{self, SKILL_MD, SkillError, SkillTarget};
 
 /// Where to install or remove the skill.
 #[derive(Debug, Args)]

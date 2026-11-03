@@ -7,7 +7,6 @@ use anyhow::Result;
 use clap::Parser;
 
 mod agent;
-pub mod agent_skill;
 mod cmd;
 
 /// OpenLogi: a local-first companion for Logitech HID++ peripherals.
