@@ -26,7 +26,7 @@ pub(super) use gpui_component::{
     input::{InputEvent, InputState},
     select::{SelectEvent, SelectItem, SelectState},
     setting::{SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
-    slider::{Slider, SliderState},
+    slider::SliderState,
     tag::Tag,
     theme::ThemeConfig,
     v_flex,
@@ -606,6 +606,7 @@ impl Render for SettingsView {
                 },
                 self.momentum_panel.clone(),
                 self.registration_status,
+                AppState::try_read(cx).is_none_or(|state| state.app_settings().show_desktop_switcher),
             ))
             .page(updates::updates_page(self.updater.clone()));
         // Registered only where grants exist to manage — see the `mod

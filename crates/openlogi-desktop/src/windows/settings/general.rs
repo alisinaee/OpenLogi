@@ -2,13 +2,13 @@
 
 use super::{
     App, AppState, Entity, FluentBuilder, IconName, IndexPath, InputState, InteractiveElement,
-    IntoElement, ParentElement, SelectItem, SelectState, SettingField, SettingGroup, SettingItem,
-    SettingPage, SharedString, Slider, SliderState, Styled, ThumbwheelSensitivity,
-    VerticalScrollSensitivity, div, h_flex, px, theme,
+    ParentElement, SelectItem, SelectState, SettingField, SettingGroup, SettingItem,
+    SettingPage, SharedString, SliderState, Styled, ThumbwheelSensitivity,
+    VerticalScrollSensitivity, div, px, theme,
 };
 use crate::ui::commit_slider::SliderUnit;
-use crate::ui::components::{control_input, control_select};
-use crate::ui::slider_row::SliderRow;
+use crate::ui::components::control_select;
+use crate::ui::slider_row::{SliderRow, slider_with_entry};
 use crate::ui::theme::FocusRingStyle as _;
 use crate::ui::theme::Typography as _;
 use gpui_base::Button as BaseButton;
@@ -81,6 +81,7 @@ pub(super) fn general_page(
     controls: ScrollControls,
     momentum: Entity<MomentumPanel>,
     registration_status: ServiceStatus,
+    show_desktop_switcher: bool,
 ) -> SettingPage {
     let ScrollControls {
         vertical_scroll,
@@ -138,6 +139,7 @@ pub(super) fn general_page(
         group
             .item(animate_desktop_switch_item())
             .item(show_desktop_switcher_item())
+            .item(desktop_switcher_show_apps_item(show_desktop_switcher))
     } else {
         group
     };
@@ -272,6 +274,23 @@ fn show_desktop_switcher_item() -> SettingItem {
     .description(tr!("app.show_desktop_switcher_description"))
 }
 
+/// The switch for mapping each desktop's windows and apps inside the desktop
+/// switcher. Off while the switcher itself is off, since it has nothing to
+/// decorate.
+fn desktop_switcher_show_apps_item(show_desktop_switcher: bool) -> SettingItem {
+    SettingItem::new(
+        tr!("app.desktop_switcher_show_apps"),
+        SettingField::switch(
+            |cx| AppState::try_read(cx).is_some_and(|s| s.app_settings().desktop_switcher_show_apps),
+            |enabled, cx| {
+                AppState::apply(cx, |state| state.commit_desktop_switcher_show_apps(enabled));
+            },
+        ),
+    )
+    .description(tr!("app.desktop_switcher_show_apps_description"))
+    .disabled(!show_desktop_switcher)
+}
+
 /// The switch for the overlay's low-battery notices.
 fn low_battery_notifications_item() -> SettingItem {
     SettingItem::new(
@@ -359,20 +378,6 @@ fn sensitivity_item<T: SliderUnit + PartialEq>(
         }
     })
     .keywords([title, description])
-}
-
-/// A slider across the row with its typed-number field at the end.
-fn slider_with_entry(slider: &Entity<SliderState>, entry: &Entity<InputState>) -> impl IntoElement {
-    h_flex()
-        .w_full()
-        .gap_3()
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(Slider::new(slider).horizontal()),
-        )
-        .child(div().flex_shrink_0().w(px(72.)).child(control_input(entry)))
 }
 
 /// The launch-at-login switch — a persisted config value the agent reads

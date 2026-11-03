@@ -16,12 +16,34 @@ use gpui::{
     AnyElement, App, Div, FontFeatures, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, SharedString, Styled, Window, div, px,
 };
+use gpui::Entity;
+use gpui_component::input::InputState;
+use gpui_component::slider::{Slider, SliderState};
 use gpui_component::{h_flex, v_flex};
 
+use super::components::control_input;
 use super::theme::{self, Palette, Typography as _};
 
 /// Selects a row's value column in GPUI tests.
 const VALUE_SELECTOR: &str = "slider-row-value";
+
+/// A slider across the row with its typed-number field at the end: the
+/// control of a slider setting that also takes an exact value.
+pub(crate) fn slider_with_entry(
+    slider: &Entity<SliderState>,
+    entry: &Entity<InputState>,
+) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .gap_3()
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(Slider::new(slider).horizontal()),
+        )
+        .child(div().flex_shrink_0().w(px(72.)).child(control_input(entry)))
+}
 
 /// A slider setting: label and value, description, slider, hint.
 #[derive(IntoElement)]
