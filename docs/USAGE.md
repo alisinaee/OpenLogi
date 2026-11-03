@@ -324,6 +324,27 @@ CLI change. Ranges marked "clamped" are applied by the app, not rejected.
 <PATH>` works on another file (and never asks the agent to reload it), which is
 how tests and scripts avoid touching the real configuration.
 
+## AI agent skill
+
+`openlogi agent-skill` installs a `SKILL.md` that teaches an AI coding agent
+(Claude Code and others that read skills) to drive OpenLogi through the CLI. The
+skill is embedded in the binary, so it always matches the installed version.
+
+```sh
+openlogi agent-skill show                         # print the bundled SKILL.md
+openlogi agent-skill path                         # where install would write it
+openlogi agent-skill install                      # ~/.claude/skills/openlogi/SKILL.md
+openlogi agent-skill install --dir ~/.agents/skills/openlogi   # any other agent
+openlogi agent-skill install --force              # replace a different SKILL.md
+openlogi agent-skill uninstall
+```
+
+The default target honours `$CLAUDE_CONFIG_DIR` (else `~/.claude`). Installing
+twice is a no-op (`"result": "unchanged"`); a `SKILL.md` that differs from the
+bundled one is never overwritten or removed without `--force`
+(`skill_differs`). `install` and `uninstall` print one JSON envelope with `path`
+and `result` (`installed`, `unchanged`, `replaced`, `removed`, `absent`).
+
 ## Asset synchronization
 
 Asset synchronization probes `assets.openlogi.org`, the Cloudflare Pages alias
