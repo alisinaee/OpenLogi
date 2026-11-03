@@ -723,10 +723,14 @@ impl Orchestrator {
             hardware,
             hook_maps: Arc::new(RwLock::new(HookMaps::default())),
             keyboard_bindings: Arc::new(RwLock::new(config.keyboard.bindings.clone())),
-            scroll_preferences: Arc::new(ScrollPreferences::new(
-                config.app_settings.smooth_scroll,
-                config.app_settings.vertical_scroll_sensitivity,
-            )),
+            scroll_preferences: {
+                let preferences = ScrollPreferences::new(
+                    config.app_settings.smooth_scroll,
+                    config.app_settings.vertical_scroll_sensitivity,
+                );
+                preferences.publish_wheel_feel(config.app_settings.wheel_feel());
+                Arc::new(preferences)
+            },
             dpi_cycle: Arc::new(RwLock::new(DpiCycles::default())),
             capture_plans,
             capture_channel: Arc::new(RwLock::new(None)),
@@ -2156,6 +2160,9 @@ impl Orchestrator {
             self.config.app_settings.smooth_scroll,
             self.config.app_settings.vertical_scroll_sensitivity,
         );
+        self.shared
+            .scroll_preferences
+            .publish_wheel_feel(self.config.app_settings.wheel_feel());
         openlogi_inject::set_desktop_switch(desktop_switch(&self.config.app_settings));
         set_desktop_switcher(&self.observable, &self.config.app_settings);
         self.observable

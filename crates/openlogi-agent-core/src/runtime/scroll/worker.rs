@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use openlogi_core::config::{MomentumParams, VerticalScrollSensitivity};
+use openlogi_core::config::{MomentumParams, VerticalScrollSensitivity, WheelEasing, WheelFeel};
 use openlogi_core::scroll::ScrollDelta;
 use tracing::warn;
 
@@ -36,6 +36,9 @@ struct ScrollPreferenceSnapshot {
 /// consistent settings snapshot instead of two independently changing values.
 pub struct ScrollPreferences {
     encoded: AtomicU8,
+    /// The smoothed-wheel feel, packed by [`pack_feel`]; independent of the
+    /// byte above because the worker applies it only to segments it starts.
+    feel: AtomicU32,
 }
 
 impl ScrollPreferences {
@@ -44,6 +47,7 @@ impl ScrollPreferences {
     pub fn new(smooth_scroll: bool, vertical_sensitivity: VerticalScrollSensitivity) -> Self {
         Self {
             encoded: AtomicU8::new(Self::encode(smooth_scroll, vertical_sensitivity)),
+            feel: AtomicU32::new(pack_feel(WheelFeel::default())),
         }
     }
 
@@ -53,6 +57,17 @@ impl ScrollPreferences {
             Self::encode(smooth_scroll, vertical_sensitivity),
             Ordering::Relaxed,
         );
+    }
+
+    /// Publish the smoothed-wheel feel.
+    pub fn publish_wheel_feel(&self, feel: WheelFeel) {
+        self.feel.store(pack_feel(feel), Ordering::Relaxed);
+    }
+
+    /// The current smoothed-wheel feel.
+    #[must_use]
+    pub fn wheel_feel(&self) -> WheelFeel {
+        unpack_feel(self.feel.load(Ordering::Relaxed))
     }
 
     /// Whether finite smooth scrolling is currently enabled.
@@ -83,6 +98,31 @@ impl ScrollPreferences {
             smooth_scroll: encoded & SMOOTH_SCROLL_FLAG != 0,
             vertical_sensitivity,
         }
+    }
+}
+
+/// Pack a feel into one word: duration in milliseconds in the low 16 bits,
+/// the curve above it, then the acceleration flag.
+fn pack_feel(feel: WheelFeel) -> u32 {
+    let easing: u32 = match feel.easing {
+        WheelEasing::Smooth => 0,
+        WheelEasing::EaseOut => 1,
+        WheelEasing::Linear => 2,
+    };
+    let millis = u32::try_from(feel.duration.as_millis()).unwrap_or(u32::MAX);
+    millis.min(u32::from(u16::MAX)) | easing << 16 | u32::from(feel.acceleration) << 20
+}
+
+fn unpack_feel(packed: u32) -> WheelFeel {
+    let easing = match (packed >> 16) & 0xF {
+        1 => WheelEasing::EaseOut,
+        2 => WheelEasing::Linear,
+        _ => WheelEasing::Smooth,
+    };
+    WheelFeel {
+        acceleration: packed >> 20 & 1 != 0,
+        easing,
+        duration: Duration::from_millis(u64::from(packed & 0xFFFF)),
     }
 }
 
@@ -557,6 +597,7 @@ fn run_worker(
         // new setting after receiving, so a toggle cancels the previous gesture
         // before the first input under the new setting starts another one.
         let smoothing = preferences.smooth_scroll_enabled();
+        engine.set_feel(preferences.wheel_feel());
         let toggled = smoothing != observed_smoothing;
         observed_smoothing = smoothing;
         if cancellations.advance_to(shared_generation.load(Ordering::Acquire)) {
@@ -617,6 +658,28 @@ fn run_worker(
 mod tests {
     use super::super::PHASED_IDLE;
     use super::*;
+
+    #[test]
+    fn wheel_feel_survives_packing() {
+        for easing in [
+            WheelEasing::Smooth,
+            WheelEasing::EaseOut,
+            WheelEasing::Linear,
+        ] {
+            for acceleration in [true, false] {
+                for millis in [WheelFeel::DURATION_MS_MIN, 100, WheelFeel::DURATION_MS_MAX] {
+                    let feel = WheelFeel {
+                        acceleration,
+                        easing,
+                        duration: Duration::from_millis(u64::from(millis)),
+                    };
+                    assert_eq!(unpack_feel(pack_feel(feel)), feel);
+                }
+            }
+        }
+        let preferences = ScrollPreferences::new(false, VerticalScrollSensitivity::DEFAULT);
+        assert_eq!(preferences.wheel_feel(), WheelFeel::default());
+    }
 
     fn sensitivity(raw: u8) -> VerticalScrollSensitivity {
         VerticalScrollSensitivity::try_new(raw).expect("test sensitivity is valid")

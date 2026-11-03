@@ -60,6 +60,21 @@ optional physical device key.
   eases its main wheel either way
 - `vertical_scroll_sensitivity`, from `1` through `100` (`14` is 1×);
   continuous trackpad input remains native
+- `scroll_acceleration` (default `true`), macOS only: whether macOS may
+  accelerate smoothed wheel output (a mouse's `smooth_wheel`, or
+  `smooth_scroll`). On, notches are posted as wheel ticks, which macOS's own
+  scroll acceleration scales by how fast you spin, so a spin starts slow and
+  speeds up. `false` posts every notch as the same pixel distance, which macOS
+  leaves alone: a notch scrolls the same distance at any speed, and
+  `vertical_scroll_sensitivity` still scales it. It does not touch a wheel
+  that is neither smoothed nor diverted (that stays native, accelerated by
+  macOS; turn on `smooth_wheel` or `smooth_scroll` to take it over)
+- `smooth_wheel_duration_ms`, from `40` through `400` (default `100`): how long
+  one smoothed step takes to play out
+- `smooth_wheel_easing`: the curve of a smoothed step. `smooth` (default) starts
+  and ends at rest, so every notch eases in; `ease_out` starts at full speed
+  and settles; `linear` holds one speed. For constant speed per notch use
+  `scroll_acceleration = false` with `ease_out` or `linear` (about `80` ms)
 - `thumbwheel_sensitivity`, from `1` through `100` (`14` is 1×)
 - `[app_settings.momentum_scrolling]` (off by default) is momentum scrolling
   for every mouse whose `smooth_wheel` is on; a device's own

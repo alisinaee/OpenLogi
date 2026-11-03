@@ -12,6 +12,17 @@ capture_mouse_events = true
 mouse_profile_target = "pointer"
 smooth_scroll = false
 vertical_scroll_sensitivity = 14
+# Smoothed wheel output (a mouse's smooth_wheel, or smooth_scroll). Defaults
+# keep today's behaviour. For a constant distance per notch use
+# scroll_acceleration = false, smooth_wheel_easing = "ease_out" (or "linear")
+# and smooth_wheel_duration_ms = 80.
+# macOS only: false posts every notch as the same pixel distance so macOS does
+# not accelerate it (default true).
+scroll_acceleration = true
+# Length of one smoothed step in ms, 40 through 400 (default 100).
+smooth_wheel_duration_ms = 100
+# Curve of a step: "smooth" (default), "ease_out" or "linear".
+smooth_wheel_easing = "smooth"
 auto_download_assets = true
 asset_source = "automatic"
 language = "en"

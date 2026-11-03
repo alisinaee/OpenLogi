@@ -27,7 +27,7 @@ use std::collections::hash_map::Entry;
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
-use openlogi_core::config::MomentumParams;
+use openlogi_core::config::{MomentumParams, WheelEasing, WheelFeel};
 use openlogi_core::scroll::{GlideCurve, ScrollDelta};
 use openlogi_inject::SmoothScrollPhase;
 
@@ -35,9 +35,10 @@ use self::free_spin::{FreeSpinDetector, WheelPhase};
 use self::reverse_lock::{Admit, ReverseLock};
 use crate::runtime::HidppSessionId;
 
-/// Duration of every [`Easing::Smooth`] segment, including a segment
-/// restarted by retargeting.
-const ANIMATION_DURATION: Duration = Duration::from_millis(100);
+/// Duration of every default-settings smoothed segment, including a segment
+/// restarted by retargeting. Owned by [`WheelFeel`], which the user can change.
+#[cfg(test)]
+const ANIMATION_DURATION: Duration = Duration::from_millis(WheelFeel::DURATION_MS_DEFAULT as u64);
 /// Duration of every [`Easing::Crisp`] segment.
 const CRISP_STEP_DURATION: Duration = Duration::from_millis(40);
 /// Output cadence. Position is evaluated from absolute time, so delayed wakes
@@ -266,8 +267,8 @@ impl ScrollSource {
 /// How a segment moves from one cumulative position to the next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Easing {
-    /// Cubic smoothstep over [`ANIMATION_DURATION`]: smoothed wheel output.
-    Smooth,
+    /// The user's chosen curve ([`WheelFeel::easing`]): smoothed wheel output.
+    Curve(WheelEasing),
     /// Linear over [`CRISP_STEP_DURATION`]: momentum scrolling's notch
     /// steps, kept short and direct so ratchet scrolling stays precise beside
     /// the glide.
@@ -275,19 +276,34 @@ enum Easing {
 }
 
 impl Easing {
-    fn duration(self) -> Duration {
-        match self {
-            Self::Smooth => ANIMATION_DURATION,
-            Self::Crisp => CRISP_STEP_DURATION,
-        }
-    }
-
     /// Normalized distance at normalized `progress`, clamped to `0..=1`.
     fn ease(self, progress: f64) -> f64 {
-        let p = progress.clamp(0.0, 1.0);
         match self {
-            Self::Smooth => p * p * (3.0 - 2.0 * p),
-            Self::Crisp => p,
+            Self::Curve(curve) => curve.ease(progress),
+            Self::Crisp => progress.clamp(0.0, 1.0),
+        }
+    }
+}
+
+/// The curve and length of one segment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Step {
+    easing: Easing,
+    duration: Duration,
+}
+
+impl Step {
+    /// Momentum scrolling's notch step.
+    const CRISP: Self = Self {
+        easing: Easing::Crisp,
+        duration: CRISP_STEP_DURATION,
+    };
+
+    /// A smoothed wheel's step under the user's settings.
+    fn smoothed(feel: &WheelFeel) -> Self {
+        Self {
+            easing: Easing::Curve(feel.easing),
+            duration: feel.duration,
         }
     }
 }
@@ -297,19 +313,19 @@ struct MotionSegment {
     from: WheelDelta,
     target: WheelDelta,
     started_at: Instant,
-    easing: Easing,
+    step: Step,
 }
 
 impl MotionSegment {
     fn position_at(&self, at: Instant) -> WheelDelta {
         let elapsed = at.saturating_duration_since(self.started_at);
-        let progress = elapsed.as_secs_f64() / self.easing.duration().as_secs_f64();
-        let eased = self.easing.ease(progress);
+        let progress = elapsed.as_secs_f64() / self.step.duration.as_secs_f64();
+        let eased = self.step.easing.ease(progress);
         self.from.plus(self.target.minus(self.from).scale(eased))
     }
 
     fn ends_at(&self) -> Instant {
-        self.started_at + self.easing.duration()
+        self.started_at + self.step.duration
     }
 
     fn is_complete_at(&self, at: Instant) -> bool {
@@ -326,13 +342,13 @@ struct ActiveMotion {
 }
 
 impl ActiveMotion {
-    fn new(impulse: WheelDelta, at: Instant, easing: Easing) -> Self {
+    fn new(impulse: WheelDelta, at: Instant, step: Step) -> Self {
         Self {
             segment: MotionSegment {
                 from: WheelDelta::ZERO,
                 target: impulse,
                 started_at: at,
-                easing,
+                step,
             },
             emitted: WheelDelta::ZERO,
             next_frame: at + FRAME_PERIOD,
@@ -341,7 +357,7 @@ impl ActiveMotion {
 
     /// Evaluate the old segment at the impulse timestamp, then restart toward
     /// the cumulative target.
-    fn retarget(&mut self, impulse: WheelDelta, at: Instant, easing: Easing) -> MotionUpdate {
+    fn retarget(&mut self, impulse: WheelDelta, at: Instant, step: Step) -> MotionUpdate {
         let position = self.segment.position_at(at);
         let target = self.segment.target.plus(impulse);
         let delta = self.delta_to(position);
@@ -353,7 +369,7 @@ impl ActiveMotion {
             from: position,
             target,
             started_at: at,
-            easing,
+            step,
         };
         self.next_frame = at + FRAME_PERIOD;
         MotionUpdate::Active(delta)
@@ -472,6 +488,8 @@ struct ScrollEngine {
     /// Smoothed main wheels under momentum scrolling, each with its device's
     /// settings, its free-spin detector and, while it glides, its glide.
     wheels: HashMap<ScrollSource, WheelState>,
+    /// The user's smoothed-wheel settings, as the worker last read them.
+    feel: WheelFeel,
 }
 
 /// One smoothed main wheel's momentum-scrolling state.
@@ -749,12 +767,22 @@ impl Flick {
 }
 
 impl ScrollEngine {
+    /// Adopt the user's smoothed-wheel settings for segments that start from
+    /// now on; a running segment finishes under the settings it began with.
+    fn set_feel(&mut self, feel: WheelFeel) {
+        self.feel = feel;
+    }
+
     /// Pixels per tick `source`'s frames are posted in: momentum scrolling's
-    /// smoothed wheels scroll in pixels, every other source in ticks.
+    /// smoothed wheels scroll in pixels at their own distance, and with
+    /// acceleration off every other smoothed source does at
+    /// [`WheelFeel::PIXELS_PER_NOTCH`] (macOS accelerates wheel ticks, not
+    /// pixels). Otherwise a source posts ticks.
     fn pixels_for(&self, source: &ScrollSource) -> Option<f64> {
         self.wheels
             .get(source)
             .map(|state| state.momentum.pixels_per_notch())
+            .or_else(|| (!self.feel.acceleration).then_some(WheelFeel::PIXELS_PER_NOTCH))
     }
 
     /// One smoothed main-wheel impulse of `notches` raw wheel notches.
@@ -1016,10 +1044,10 @@ impl ScrollEngine {
     ) {
         let pixels = self.pixels_for(&source);
         // Momentum scrolling's wheel steps crisply; every other wheel eases.
-        let easing = if pixels.is_some() {
-            Easing::Crisp
+        let step = if self.wheels.contains_key(&source) {
+            Step::CRISP
         } else {
-            Easing::Smooth
+            Step::smoothed(&self.feel)
         };
         if self
             .active
@@ -1033,14 +1061,14 @@ impl ScrollEngine {
 
         let update = match self.active.entry(source) {
             Entry::Occupied(mut entry) => {
-                let update = entry.get_mut().retarget(impulse, at, easing);
+                let update = entry.get_mut().retarget(impulse, at, step);
                 if update.is_finished() {
                     entry.remove();
                 }
                 Some(update)
             }
             Entry::Vacant(entry) => {
-                entry.insert(ActiveMotion::new(impulse, at, easing));
+                entry.insert(ActiveMotion::new(impulse, at, step));
                 None
             }
         };
