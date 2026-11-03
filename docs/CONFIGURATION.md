@@ -128,6 +128,13 @@ optional physical device key.
   frame covers 15% of the distance left; the Dock finishes the slide. That
   action returns when the last frame is posted, about 315 ms later. With the
   setting off, the agent posts two frames and the Dock changes Space at once.
+- `show_desktop_switcher` (default `true`, macOS only): after Previous Desktop
+  or Next Desktop, the overlay briefly shows one numbered box per desktop of
+  the display under the pointer, the current one highlighted. A further switch
+  moves the highlight in place, and the box fades out about 0.8 seconds after
+  the last switch. It shows once the switch is confirmed, and at the first or
+  last desktop it shows the unchanged position. With the setting off nothing
+  shows.
   A change applies from the next switch. Windows and Linux ignore the setting.
 
 `[devices."<physical-key>"]` contains per-device state. Receiver keys look like

@@ -316,6 +316,11 @@ pub struct AppSettings {
     /// Logi Options+; off switches instantly. Only macOS reads it.
     #[serde(default = "default_true")]
     pub animate_desktop_switch: bool,
+    /// Whether the overlay briefly shows one box per desktop, the current one
+    /// highlighted, after Previous Desktop or Next Desktop. **On by default.**
+    /// Only macOS reads it.
+    #[serde(default = "default_true")]
+    pub show_desktop_switcher: bool,
 }
 
 const SENSITIVITY_MIN: u8 = 1;
@@ -523,6 +528,7 @@ impl Default for AppSettings {
             low_battery_notifications: true,
             lock_key_notifications: true,
             animate_desktop_switch: true,
+            show_desktop_switcher: true,
         }
     }
 }

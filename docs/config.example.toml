@@ -24,6 +24,9 @@ app_icon = "openlogi"
 # macOS only: Previous / Next Desktop slide like a three-finger swipe (default
 # true); false switches at once.
 animate_desktop_switch = true
+# macOS only: a numbered box per desktop flashes after Previous / Next Desktop
+# (default true).
+show_desktop_switcher = true
 
 # Momentum scrolling for every mouse whose smooth_wheel is on. A device's own
 # momentum_scrolling table overrides it.

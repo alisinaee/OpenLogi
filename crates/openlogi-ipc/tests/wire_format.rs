@@ -118,7 +118,7 @@ fn representative_smartshift_status() -> SmartShiftStatus {
 /// unreleased version and leave this pin alone (`crates/openlogi-ipc/AGENTS.md`).
 #[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 44);
+    assert_eq!(PROTOCOL_VERSION, 45);
 }
 
 #[test]
@@ -443,6 +443,20 @@ fn notices() {
             language: None,
         },
         "010000",
+    );
+    assert_wire(
+        &NoticeObservation {
+            generation: 4,
+            notices: vec![Notice {
+                id: 9,
+                kind: NoticeKind::DesktopSwitch {
+                    count: 5,
+                    current: 2,
+                },
+            }],
+            language: None,
+        },
+        "04010901050200",
     );
 }
 

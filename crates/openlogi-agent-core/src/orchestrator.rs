@@ -708,6 +708,7 @@ impl Orchestrator {
         let (host_switch_links_tx, host_switch_links) = watch::channel(Arc::new(Vec::new()));
         let (watched_lights_tx, watched_lights) = watch::channel(Arc::new(Vec::new()));
         openlogi_inject::set_desktop_switch(desktop_switch(&config.app_settings));
+        set_desktop_switcher(&observable, &config.app_settings);
         let receiver_access = ReceiverAccess::default();
         let flow = FlowController::new(
             &config.flow,
@@ -2156,6 +2157,7 @@ impl Orchestrator {
             self.config.app_settings.vertical_scroll_sensitivity,
         );
         openlogi_inject::set_desktop_switch(desktop_switch(&self.config.app_settings));
+        set_desktop_switcher(&self.observable, &self.config.app_settings);
         self.observable
             .set_launch_at_login(self.config.app_settings.launch_at_login);
         let retained_overrides: HashSet<String> = self
@@ -2371,6 +2373,25 @@ fn desktop_switch(settings: &AppSettings) -> openlogi_inject::DesktopSwitch {
     } else {
         openlogi_inject::DesktopSwitch::Instant
     }
+}
+
+/// Show the desktop switcher after each confirmed Previous or Next Desktop
+/// switch, unless the user turned [`AppSettings::show_desktop_switcher`] off.
+/// The switch reports from its own thread, so the observer only posts a
+/// notice.
+fn set_desktop_switcher(observable: &Arc<ObservableState>, settings: &AppSettings) {
+    let observer = settings.show_desktop_switcher.then(|| {
+        let observable = Arc::clone(observable);
+        let language = settings.language.clone();
+        Arc::new(move |position: openlogi_inject::DesktopPosition| {
+            observable.notices().post_desktop_switch(
+                position.count,
+                position.current,
+                language.clone(),
+            );
+        }) as openlogi_inject::DesktopObserver
+    });
+    openlogi_inject::set_desktop_observer(observer);
 }
 
 fn configured_disabled_keys(config: &Config, device_key: &str) -> Option<DisableKeysMask> {

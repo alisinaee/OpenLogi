@@ -384,6 +384,37 @@ pub fn set_desktop_switch(switch: DesktopSwitch) {
     }
 }
 
+/// Where a confirmed Previous or Next Desktop switch left the pointer's
+/// display: its desktops in Mission Control order, the current one among them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DesktopPosition {
+    /// How many desktops the display has, full-screen Spaces included, as
+    /// Mission Control lists them.
+    pub count: u16,
+    /// The current desktop, counted from 1.
+    pub current: u16,
+}
+
+/// Where a switch reports its [`DesktopPosition`]. Called from the thread
+/// that confirmed the switch, so it must not block.
+pub type DesktopObserver = std::sync::Arc<dyn Fn(DesktopPosition) + Send + Sync>;
+
+/// Report each confirmed [`Action::PreviousDesktop`] and [`Action::NextDesktop`]
+/// switch to `observer`, or stop reporting with `None`. A switch that stops at
+/// the first or last desktop reports the unchanged position; one that cannot
+/// be confirmed reports nothing. Only macOS reads the Space list; elsewhere
+/// this does nothing.
+pub fn set_desktop_observer(observer: Option<DesktopObserver>) {
+    cfg_select! {
+        target_os = "macos" => {
+            macos::set_desktop_observer(observer);
+        }
+        _ => {
+            let _ = observer;
+        }
+    }
+}
+
 /// One synthetic held chord, released exactly once when dropped.
 ///
 /// Keep this value with the physical press lifecycle. Replacing its chord

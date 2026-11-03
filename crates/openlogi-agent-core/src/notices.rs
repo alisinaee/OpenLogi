@@ -14,7 +14,10 @@ use std::time::Duration;
 
 use openlogi_core::config::AppSettings;
 use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus};
-use openlogi_ipc::{Generation, Notice, NoticeKind, NoticeObservation, OBSERVE_HOLD};
+use openlogi_ipc::{
+    DESKTOP_SWITCH_FADE, DESKTOP_SWITCH_HOLD, Generation, Notice, NoticeKind, NoticeObservation,
+    OBSERVE_HOLD,
+};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
@@ -64,15 +67,35 @@ impl NoticeBoard {
     /// Show `kind` for [`NOTICE_LIFETIME`], in the UI locale `language`
     /// (`None` follows the overlay host's system locale).
     pub fn post(&self, kind: NoticeKind, language: Option<String>) {
+        self.post_for(kind, language, NOTICE_LIFETIME);
+    }
+
+    /// Show where a desktop switch left the display, replacing the switcher
+    /// already on show, until its hold and fade are over. Callable from any
+    /// thread: it takes a short lock and never waits.
+    pub fn post_desktop_switch(&self, count: u16, current: u16, language: Option<String>) {
+        self.post_for(
+            NoticeKind::DesktopSwitch { count, current },
+            language,
+            DESKTOP_SWITCH_HOLD + DESKTOP_SWITCH_FADE,
+        );
+    }
+
+    fn post_for(&self, kind: NoticeKind, language: Option<String>, lifetime: Duration) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let now = Instant::now();
         let mut posted = self.posted();
         // No overlay may be observing to end them, so a post drops what has
         // ended too: the list never grows past the notices still current.
-        posted.retain(|posted| posted.ends > now);
+        // Of the switchers only the latest shows, so it drops the older one.
+        let switcher = matches!(kind, NoticeKind::DesktopSwitch { .. });
+        posted.retain(|posted| {
+            posted.ends > now
+                && !(switcher && matches!(posted.notice.kind, NoticeKind::DesktopSwitch { .. }))
+        });
         posted.push(Posted {
             notice: Notice { id, kind },
-            ends: now + NOTICE_LIFETIME,
+            ends: now + lifetime,
         });
         self.publish(&posted, Locale::Set(language));
     }

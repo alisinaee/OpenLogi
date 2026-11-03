@@ -177,7 +177,9 @@ pub use succession::Identity;
 ///      `Agent::{read_flow_identity, start_flow_pairing, pair_flow_peer,
 ///      confirm_flow_pairing, cancel_flow_pairing, stop_flow_pairing}`
 ///      appended after those — pairing another computer for Flow.
-pub const PROTOCOL_VERSION: u32 = 44;
+///      `NoticeKind::DesktopSwitch` appended — the overlay's desktop switcher
+///      after Previous Desktop or Next Desktop on macOS.
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the
 /// run token it will serve, so the helper knows which agent it belongs to
@@ -844,6 +846,13 @@ pub struct LockKeyChange {
     pub engaged: bool,
 }
 
+/// How long the desktop switcher stays fully visible after the latest switch.
+pub const DESKTOP_SWITCH_HOLD: Duration = Duration::from_millis(800);
+
+/// How long the desktop switcher then takes to fade out. The agent keeps the
+/// notice for the hold plus this, and the overlay draws the fade inside it.
+pub const DESKTOP_SWITCH_FADE: Duration = Duration::from_millis(250);
+
 /// What a notice tells the user.
 ///
 /// Variants are append-only because this enum crosses bincode IPC.
@@ -860,6 +869,15 @@ pub enum NoticeKind {
         kind: DeviceKind,
         /// The reading that made the battery low.
         battery: BatteryInfo,
+    },
+    /// The desktop (macOS Space) switcher: one box per desktop of the
+    /// display the pointer is on, the current one highlighted. A newer one
+    /// replaces the one on show, and each is short-lived.
+    DesktopSwitch {
+        /// How many desktops the display has.
+        count: u16,
+        /// The current desktop, counted from 1.
+        current: u16,
     },
 }
 

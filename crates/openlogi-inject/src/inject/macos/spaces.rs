@@ -13,7 +13,7 @@
 use std::ffi::{c_int, c_void};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, mpsc};
+use std::sync::{LazyLock, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
@@ -33,10 +33,10 @@ use objc2_foundation::{
     ns_string,
 };
 
-use super::super::DesktopSwitch;
 use super::super::space_switch::{
     self, Backend, Direction, Failure, Lease, Pace, PostGate, SlideFrame, SlidePhase, SpaceState,
 };
+use super::super::{DesktopObserver, DesktopPosition, DesktopSwitch};
 use super::{app_services, app_services_symbol};
 
 static BUSY: AtomicBool = AtomicBool::new(false);
@@ -46,6 +46,38 @@ static SLIDE: AtomicBool = AtomicBool::new(false);
 
 pub(in crate::inject) fn set_desktop_switch(switch: DesktopSwitch) {
     SLIDE.store(switch == DesktopSwitch::Animated, Ordering::Relaxed);
+}
+
+/// Where confirmed switches are reported; see [`set_desktop_observer`].
+static OBSERVER: Mutex<Option<DesktopObserver>> = Mutex::new(None);
+
+pub(in crate::inject) fn set_desktop_observer(observer: Option<DesktopObserver>) {
+    *OBSERVER.lock().unwrap_or_else(PoisonError::into_inner) = observer;
+}
+
+/// Tell the observer, if any, where `state` leaves the display. A Space list
+/// that does not hold the current Space, or is too long to count, says nothing.
+fn report(state: &SpaceState) {
+    let observer = OBSERVER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let Some(observer) = observer else {
+        return;
+    };
+    let position = state
+        .ordered
+        .iter()
+        .position(|id| *id == state.current)
+        .and_then(|index| {
+            Some(DesktopPosition {
+                count: u16::try_from(state.ordered.len()).ok()?,
+                current: u16::try_from(index + 1).ok()?,
+            })
+        });
+    if let Some(position) = position {
+        observer(position);
+    }
 }
 
 fn desktop_switch() -> DesktopSwitch {
@@ -79,10 +111,14 @@ fn start(direction: Direction) {
     let result = space_switch::spawn_ordered(move |gate| {
         let _lease = lease;
         autoreleasepool(|_| {
-            let result = Native::new(display_id, switch)
-                .and_then(|mut native| space_switch::run(&mut native, direction, gate));
+            let result = Native::new(display_id, switch).and_then(|mut native| {
+                let outcome = space_switch::run(&mut native, direction, gate)?;
+                // The position the switch ended on. A failed read only
+                // costs the switcher: the switch itself is confirmed.
+                Ok((outcome, native.state().ok()))
+            });
             match result {
-                Ok(outcome) => {
+                Ok((outcome, state)) => {
                     tracing::debug!(
                         display_id,
                         ?direction,
@@ -90,6 +126,9 @@ fn start(direction: Direction) {
                         ?outcome,
                         "Space switch result"
                     );
+                    if let Some(state) = state {
+                        report(&state);
+                    }
                 }
                 Err(error) => tracing::warn!(
                     display_id,

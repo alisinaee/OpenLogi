@@ -285,3 +285,22 @@ async fn an_unchanged_board_answers_after_the_hold() {
     assert_eq!(unchanged.generation, since);
     assert_eq!(started.elapsed(), OBSERVE_HOLD);
 }
+
+#[tokio::test]
+async fn a_newer_desktop_switch_replaces_the_older_and_keeps_battery_notices() {
+    let board = NoticeBoard::default();
+    board.post(low_battery("MX"), None);
+    board.post_desktop_switch(4, 1, None);
+    board.post_desktop_switch(4, 2, None);
+    let observed = board.observe(0).await;
+    let kinds: Vec<_> = observed.notices.iter().map(|n| &n.kind).collect();
+    assert_eq!(kinds.len(), 2);
+    assert!(matches!(kinds[0], NoticeKind::LowBattery { .. }));
+    assert_eq!(
+        kinds[1],
+        &NoticeKind::DesktopSwitch {
+            count: 4,
+            current: 2
+        }
+    );
+}
