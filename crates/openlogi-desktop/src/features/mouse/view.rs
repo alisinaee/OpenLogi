@@ -14,7 +14,7 @@ use gpui_component::{
     input::{InputEvent, InputState},
     v_flex,
 };
-use openlogi_core::binding::{Action, ButtonId, GamingLayout, GestureDirection};
+use openlogi_core::binding::{Action, ButtonId, GamingLayout, GestureDirection, LongPressBinding};
 
 use super::force_sensing::{ForceSensingFacts, ForceSensingSlider, PressForce};
 use super::geometry::{
@@ -23,8 +23,8 @@ use super::geometry::{
 };
 use super::hotspots::{Hotspot, MOUSE_MODEL_SIZE, MouseControlId};
 use super::inspector::{
-    ActionPickerContext, BindingInspectorData, InvalidDrafts, ShortcutError, ShortcutMode,
-    binding_inspector,
+    ActionPickerContext, BindingInspectorData, InvalidDrafts, PickSlot, ShortcutError,
+    ShortcutMode, binding_inspector, hold_range,
 };
 use super::leader_lines::{Geometry as LeaderGeometry, Label, paint as paint_leader_lines};
 use crate::app::{glow_canvas, keyboard_glow};
@@ -33,6 +33,7 @@ use crate::features::keyboard::editors::{PowerUserKind, text_editor_placeholder}
 use crate::features::profiles::{profile_canvas_status, profile_name};
 use crate::services::assets::{GlowGeometry, ResolvedAsset};
 use crate::state::{AppOverrides, AppState, BindingLayer, DeviceKey, DeviceRecord, StateEvent};
+use crate::ui::commit_slider::CommitSlider;
 use crate::ui::theme::{self, ACCENT_BLUE};
 
 const SIDE_GAP: f32 = 24.;
@@ -53,6 +54,9 @@ const _: () = assert!(
     "two columns of the narrowest cards must leave the render its minimum width"
 );
 
+/// The default hold time in milliseconds, where the slider rests while no
+/// tap-and-hold button is selected.
+const LONG_PRESS_MS: u16 = 500;
 const CARD_EDGE_INSET: f32 = SIDE_GAP;
 
 const HOTSPOT_DOT: f32 = 12.;
@@ -101,6 +105,7 @@ struct MouseWorkspaceData<'a> {
     dpi_gestures: bool,
     virtual_thumbwheel: bool,
     wheel_hold: &'a BTreeSet<ButtonId>,
+    long_presses: &'a BTreeMap<ButtonId, LongPressBinding>,
     editing_app: Option<String>,
     overridden: Option<AppOverrides<'a>>,
     /// Actions the picker offers beyond the catalog.
@@ -137,6 +142,7 @@ impl<'a> MouseWorkspaceData<'a> {
                 .and_then(|record| record.capabilities)
                 .is_some_and(|capabilities| capabilities.virtual_thumbwheel),
             wheel_hold: state.wheel_hold_buttons(),
+            long_presses: state.long_presses(),
             editing_app: if state.binding_layer() == BindingLayer::GShift {
                 Some(tr!("actions.g_shift").to_string())
             } else {
@@ -163,6 +169,7 @@ impl<'a> MouseWorkspaceData<'a> {
         static NO_GESTURE_MAPS: BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>> =
             BTreeMap::new();
         static NO_WHEEL_HOLD: BTreeSet<ButtonId> = BTreeSet::new();
+        static NO_LONG_PRESSES: BTreeMap<ButtonId, LongPressBinding> = BTreeMap::new();
         Self {
             asset: None,
             layout: None,
@@ -174,6 +181,7 @@ impl<'a> MouseWorkspaceData<'a> {
             dpi_gestures: false,
             virtual_thumbwheel: false,
             wheel_hold: &NO_WHEEL_HOLD,
+            long_presses: &NO_LONG_PRESSES,
             editing_app: None,
             overridden: None,
             extra_actions: &[],
@@ -191,6 +199,10 @@ pub struct MouseModelView {
     /// The gesture direction whose action is open in the fixed inspector.
     gesture_active_dir: Option<GestureDirection>,
     action_picker_open: bool,
+    /// Which action of a tap-and-hold button the open picker chooses.
+    picker_slot: PickSlot,
+    /// The hold time of the selected tap-and-hold button.
+    hold_slider: CommitSlider<u16>,
     action_search: Entity<InputState>,
     pub(super) custom_shortcut_input: Entity<InputState>,
     pub(super) custom_application_input: Entity<InputState>,
@@ -274,6 +286,12 @@ impl MouseModelView {
             selected: None,
             gesture_active_dir: None,
             action_picker_open: false,
+            picker_slot: PickSlot::Tap,
+            hold_slider: CommitSlider::new(hold_range(), LONG_PRESS_MS, cx, |view, ms, cx| {
+                if let Some(button) = view.selected.and_then(MouseControlId::button) {
+                    AppState::apply(cx, |state| state.commit_hold_time(button, ms));
+                }
+            }),
             action_search,
             custom_shortcut_input,
             custom_application_input,
@@ -315,8 +333,10 @@ impl MouseModelView {
         self.shortcut_recorder = None;
     }
 
-    pub(super) fn toggle_action_picker(&mut self) {
-        self.action_picker_open = !self.action_picker_open;
+    /// Open the picker for `slot`, or close it when it already chooses it.
+    pub(super) fn toggle_action_picker(&mut self, slot: PickSlot) {
+        self.action_picker_open = !(self.action_picker_open && self.picker_slot == slot);
+        self.picker_slot = slot;
         self.shortcut_recorder = None;
     }
 
@@ -343,6 +363,7 @@ impl MouseModelView {
     fn action_picker_context<'a>(&'a self, view: &'a Entity<Self>) -> ActionPickerContext<'a> {
         ActionPickerContext {
             open: self.action_picker_open,
+            slot: self.picker_slot,
             search: &self.action_search,
             shortcut_input: &self.custom_shortcut_input,
             application_input: &self.custom_application_input,
@@ -469,6 +490,20 @@ impl MouseModelView {
     /// Follow a device change, then keep the press-force slider in step with
     /// the selection it may have cleared. Runs before `render` reads the
     /// state for the frame, since the slider sync needs the context mutably.
+    /// Seat the hold time slider on the selected button's hold time, and say
+    /// whether that button may take a hold action.
+    fn sync_hold(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let committed = AppState::try_read(cx)
+            .zip(self.selected.and_then(MouseControlId::button))
+            .and_then(|(state, button)| state.long_presses().get(&button))
+            .and_then(|binding| u16::try_from(binding.threshold().as_millis()).ok())
+            .unwrap_or(LONG_PRESS_MS);
+        self.hold_slider.sync(committed, window, cx);
+        self.selected
+            .and_then(MouseControlId::button)
+            .is_some_and(|button| AppState::try_read(cx).is_some_and(|s| s.can_edit_hold(button)))
+    }
+
     fn sync_selection(
         &mut self,
         window: &mut Window,
@@ -516,8 +551,13 @@ impl RecordsShortcut for MouseModelView {
 }
 
 impl Render for MouseModelView {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the workspace render assembles the canvas and inspector inline"
+    )]
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.localize_action_picker_inputs(window, cx);
+        let hold_editable = self.sync_hold(window, cx);
         let force_sensing = self.sync_selection(window, cx);
         let MouseWorkspaceData {
             asset,
@@ -530,6 +570,7 @@ impl Render for MouseModelView {
             dpi_gestures,
             virtual_thumbwheel,
             wheel_hold,
+            long_presses,
             editing_app,
             overridden,
             extra_actions,
@@ -545,7 +586,9 @@ impl Render for MouseModelView {
             })
             .collect();
 
-        let value = |control| binding_label_for_control(control, bindings, &gesture_buttons).text;
+        let label_of =
+            |control| binding_label_for_control(control, bindings, long_presses, &gesture_buttons);
+        let value = |control| label_of(control).text;
         let ModelLayout {
             canvas_w,
             canvas_h,
@@ -585,7 +628,8 @@ impl Render for MouseModelView {
             .child(breathing_art)
             .child(leader_canvas)
             .children(labels_outer.iter().enumerate().map(|(idx, label)| {
-                let binding = binding_label_for_control(label.id, bindings, &gesture_buttons);
+                let binding =
+                    binding_label_for_control(label.id, bindings, long_presses, &gesture_buttons);
                 label_control(
                     idx,
                     *label,
@@ -614,6 +658,9 @@ impl Render for MouseModelView {
                 press_force: PressForce::of(force_sensing.as_ref(), self.force_sensing.as_ref()),
                 extra_actions,
                 hidden_actions,
+                long_presses,
+                hold_editable,
+                hold_slider: Some(&self.hold_slider),
             },
             self.action_picker_context(&view),
             cx,

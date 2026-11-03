@@ -1,7 +1,8 @@
 //! Button, thumb-wheel, gesture and Actions Ring edits, global and per-app.
 
 use super::*;
-use openlogi_core::binding::LongPressBinding;
+use crate::state::BindingLayer;
+use openlogi_core::binding::{LongPressBinding, PerAppBinding};
 
 #[test]
 fn picking_a_short_action_preserves_the_long_press_binding() {
@@ -580,4 +581,101 @@ fn gesture_maps_cover_every_gesture_mode_button() {
         maps.contains_key(&ButtonId::Back),
         "a promoted OS-hook button gets its own menu simultaneously"
     );
+}
+
+fn hold(ms: u16) -> openlogi_core::binding::HoldThreshold {
+    openlogi_core::binding::HoldThreshold::try_from(ms).unwrap()
+}
+
+#[test]
+fn tap_and_hold_in_the_global_profile_saves_both_actions_and_the_hold_time() {
+    let mut state = state_with_a_known_mouse();
+    let button = ButtonId::Back;
+    let tap = state.button_bindings()[&button].clone();
+
+    let _ = state.commit_tap_hold(button, true);
+    assert_eq!(
+        state.long_presses().get(&button),
+        Some(&LongPressBinding::new(tap, Action::None))
+    );
+
+    let _ = state.commit_hold_action(button, Action::MissionControl);
+    let _ = state.commit_hold_time(button, 1000);
+    let _ = state.commit_binding(button, Action::Copy);
+
+    let expected =
+        LongPressBinding::new(Action::Copy, Action::MissionControl).with_hold(hold(1000));
+    assert_eq!(
+        state.config.stored_bindings(KNOWN_MOUSE_KEY).get(&button),
+        Some(&Binding::LongPress(expected.clone())),
+        "picking the tap action must keep the hold action and its time"
+    );
+    assert_eq!(state.long_presses().get(&button), Some(&expected));
+    assert_eq!(state.button_bindings()[&button], Action::Copy);
+
+    let _ = state.commit_tap_hold(button, false);
+    assert_eq!(
+        state.config.stored_bindings(KNOWN_MOUSE_KEY).get(&button),
+        Some(&Binding::Single(Action::Copy))
+    );
+    assert!(state.long_presses().is_empty());
+}
+
+#[test]
+fn tap_and_hold_in_a_per_app_profile_is_stored_beside_a_plain_global_binding() {
+    let mut state = state_editing("com.apple.Safari");
+    let button = ButtonId::Forward;
+    let _ = state.commit_binding(button, Action::Undo);
+    let _ = state.commit_tap_hold(button, true);
+    let _ = state.commit_hold_action(button, Action::Redo);
+    let _ = state.commit_hold_time(button, 2500);
+
+    let expected = LongPressBinding::new(Action::Undo, Action::Redo).with_hold(hold(2500));
+    assert_eq!(
+        state
+            .config
+            .per_app_overrides(KNOWN_MOUSE_KEY, "com.apple.Safari")
+            .and_then(|overrides| overrides.get(&button)),
+        Some(&PerAppBinding::LongPress(expected.clone()))
+    );
+    assert!(
+        state.config.stored_bindings(KNOWN_MOUSE_KEY).is_empty(),
+        "the device's global bindings must be untouched"
+    );
+    assert_eq!(state.long_presses().get(&button), Some(&expected));
+
+    let _ = state.commit_tap_hold(button, false);
+    assert_eq!(
+        state
+            .config
+            .per_app_overrides(KNOWN_MOUSE_KEY, "com.apple.Safari")
+            .and_then(|overrides| overrides.get(&button)),
+        Some(&PerAppBinding::Single(Action::Undo))
+    );
+    assert!(state.long_presses().is_empty());
+}
+
+#[test]
+fn a_hold_time_outside_the_accepted_range_is_not_stored() {
+    let mut state = state_with_a_known_mouse();
+    let _ = state.commit_tap_hold(ButtonId::Back, true);
+    let _ = state.commit_hold_time(ButtonId::Back, 100);
+    let _ = state.commit_hold_time(ButtonId::Back, 4000);
+
+    assert_eq!(
+        state.long_presses()[&ButtonId::Back].threshold(),
+        openlogi_core::binding::LONG_PRESS_THRESHOLD
+    );
+}
+
+#[test]
+fn tap_and_hold_is_not_offered_to_a_gesture_button_or_the_g_shift_layer() {
+    let mut state = state_with_a_known_mouse();
+    let _ = state.commit_gesture_mode(ButtonId::Back, true);
+    assert!(!state.can_edit_hold(ButtonId::Back));
+    let _ = state.commit_tap_hold(ButtonId::Back, true);
+    assert!(state.long_presses().is_empty());
+
+    let _ = state.set_binding_layer(BindingLayer::GShift);
+    assert!(!state.can_edit_hold(ButtonId::MiddleClick));
 }

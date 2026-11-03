@@ -3,13 +3,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use openlogi_core::binding::{
-    Action, Binding, ButtonId, GamingLayout, GestureDirection, KeypadPage, LongPressBinding,
-    PerAppBinding, WheelHoldBinding,
+    Action, Binding, ButtonId, GamingLayout, GestureDirection, HoldThreshold, KeypadPage,
+    LONG_PRESS_THRESHOLD, LongPressBinding, PerAppBinding, WheelHoldBinding, default_binding_on,
 };
 use openlogi_core::bindings::{
     bindings_for, button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
 };
 use openlogi_core::config::{Config, KeyTrigger};
+use std::time::Duration;
+
 use tracing::debug;
 
 use crate::features::mouse::thumbwheel::{ThumbwheelPair, ThumbwheelPreset};
@@ -81,6 +83,9 @@ pub(super) struct BindingState {
     /// Device-global like the gesture maps: a per-app entry holds one
     /// `Action`, so wheel-hold lives only in the global profile.
     wheel_hold_buttons: BTreeSet<ButtonId>,
+    /// Buttons with a tap and a hold action in the open profile: the global
+    /// ones, overlaid by the app profile's own overrides.
+    long_presses: BTreeMap<ButtonId, LongPressBinding>,
     /// Global keyboard F-key bindings (Esc + F1-F19).
     keyboard_bindings: BTreeMap<KeyTrigger, Action>,
 }
@@ -97,6 +102,7 @@ impl BindingState {
             button_bindings: BTreeMap::new(),
             gesture_bindings: BTreeMap::new(),
             wheel_hold_buttons: BTreeSet::new(),
+            long_presses: BTreeMap::new(),
             keyboard_bindings: config.keyboard.bindings.clone(),
         };
         state.refresh_device(config, persistent_key, layout);
@@ -159,6 +165,22 @@ impl BindingState {
             button_bindings.extend(layer.clone());
         }
         let gesture_bindings = gesture_maps_for(config, persistent_key);
+        self.long_presses = if self.editing_gshift(persistent_key) {
+            BTreeMap::new()
+        } else {
+            button_bindings_for(
+                config,
+                persistent_key,
+                self.editing_app(persistent_key),
+                layout,
+            )
+            .into_iter()
+            .filter_map(|(button, binding)| match binding {
+                Binding::LongPress(binding) => Some((button, binding)),
+                _ => None,
+            })
+            .collect()
+        };
         self.button_bindings = button_bindings;
         self.gesture_bindings = gesture_bindings;
         self.wheel_hold_buttons = persistent_key.map_or_else(BTreeSet::new, |key| {
@@ -190,6 +212,83 @@ fn gesture_maps_for(
     let mut maps = hidpp_gesture_maps_for(config, Some(key), None);
     maps.extend(oshook_gestures_for(config, Some(key), None));
     maps
+}
+
+/// `short` and `long` held for `threshold`. The one place a long press is
+/// rebuilt from its parts, so every edit keeps the hold time the others set.
+fn long_press(short: Action, long: Action, threshold: Duration) -> LongPressBinding {
+    let binding = LongPressBinding::new(short, long);
+    match u16::try_from(threshold.as_millis())
+        .ok()
+        .filter(|_| threshold != LONG_PRESS_THRESHOLD)
+        .and_then(|ms| HoldThreshold::try_from(ms).ok())
+    {
+        Some(hold) => binding.with_hold(hold),
+        None => binding,
+    }
+}
+
+/// `binding` with its tap action replaced by `short`.
+fn long_press_with_short(short: Action, binding: &LongPressBinding) -> LongPressBinding {
+    long_press(short, binding.long().clone(), binding.threshold())
+}
+
+/// Record `binding` as `button`'s override in `app`'s profile.
+fn set_per_app_long_press(
+    config: &mut Config,
+    device_key: &str,
+    app: &str,
+    button: ButtonId,
+    binding: LongPressBinding,
+) {
+    config
+        .devices
+        .entry(device_key.to_string())
+        .or_default()
+        .per_app_bindings
+        .entry(app.to_string())
+        .or_default()
+        .insert(button, PerAppBinding::LongPress(binding));
+}
+
+/// One edit of a button's tap-and-hold pair.
+enum HoldEdit {
+    /// Add a hold action (starting as do nothing) beside the tap action.
+    Enable,
+    /// Go back to the tap action alone.
+    Disable,
+    /// Replace the hold action.
+    Action(Action),
+    /// Replace the hold time.
+    Time(HoldThreshold),
+}
+
+/// What a [`HoldEdit`] leaves a button as.
+enum HoldChange {
+    /// The edit does not apply, so nothing is written.
+    Unchanged,
+    /// The tap action alone.
+    Single,
+    /// A tap and a hold action.
+    Pair(LongPressBinding),
+}
+
+impl HoldEdit {
+    /// What `self` makes of a button tapping `short` with `current` as its
+    /// hold. Editing the hold of a button that has none changes nothing.
+    fn apply(self, short: Action, current: Option<&LongPressBinding>) -> HoldChange {
+        match (self, current) {
+            (Self::Enable, None) => HoldChange::Pair(LongPressBinding::new(short, Action::None)),
+            (Self::Disable, Some(_)) => HoldChange::Single,
+            (Self::Action(long), Some(current)) => {
+                HoldChange::Pair(long_press(short, long, current.threshold()))
+            }
+            (Self::Time(hold), Some(current)) => HoldChange::Pair(
+                LongPressBinding::new(short, current.long().clone()).with_hold(hold),
+            ),
+            _ => HoldChange::Unchanged,
+        }
+    }
 }
 
 /// Write both halves of a thumb-wheel preset into `app`'s profile, or the
@@ -409,18 +508,28 @@ impl AppState {
         };
         let app = self.editing_app().map(str::to_string);
         let gshift = self.binding_layer() == BindingLayer::GShift;
+        let long_press = self.bindings.long_presses.get(&button).cloned();
         self.config.edit(|config| {
-            // A per-app entry is `Action`-valued, so an override always
-            // replaces the whole button — which is exactly what picking one
-            // action means, and why gesture mode is not offered in this scope.
+            // A per-app entry replaces the whole button — which is exactly what
+            // picking an action means, and why gesture mode is not offered in
+            // this scope. A button with a hold action keeps it, and its time.
             if let Some(app) = app {
-                config.set_per_app_binding(&key, &app, button, Some(action));
+                match long_press {
+                    Some(held) => set_per_app_long_press(
+                        config,
+                        &key,
+                        &app,
+                        button,
+                        long_press_with_short(action, &held),
+                    ),
+                    None => config.set_per_app_binding(&key, &app, button, Some(action)),
+                }
             } else if gshift {
                 config.set_gshift_binding(&key, button, Some(action));
             } else {
                 let binding = match config.stored_bindings(&key).get(&button) {
                     Some(Binding::LongPress(binding)) => {
-                        Binding::LongPress(LongPressBinding::new(action, binding.long().clone()))
+                        Binding::LongPress(long_press_with_short(action, binding))
                     }
                     Some(Binding::WheelHold(_)) => {
                         Binding::WheelHold(WheelHoldBinding::horizontal_scroll(action))
@@ -430,8 +539,100 @@ impl AppState {
                 config.set_binding(&key, button, binding);
             }
         });
+        self.refresh_binding_projections();
         // The agent owns the hook; have it rebuild its live map from config.
         self.persist_and_reload("binding");
+        events
+    }
+
+    /// Buttons with a tap and a hold action in the open profile.
+    #[must_use]
+    pub fn long_presses(&self) -> &BTreeMap<ButtonId, LongPressBinding> {
+        &self.bindings.long_presses
+    }
+
+    /// Whether the open profile can give `button` a hold action: not the
+    /// G-Shift layer, and not a button that gestures or holds the wheel in the
+    /// global profile.
+    #[must_use]
+    pub fn can_edit_hold(&self, button: ButtonId) -> bool {
+        if self.binding_layer() == BindingLayer::GShift {
+            return false;
+        }
+        let Some(key) = self
+            .current_record()
+            .and_then(DeviceRecord::persistent_config_key)
+        else {
+            return false;
+        };
+        self.editing_app().is_some()
+            || (!self.config.is_gesture_mode(key, button)
+                && !self.config.is_wheel_hold(key, button))
+    }
+
+    /// Turn the hold action of `button` on or off in the open profile.
+    pub fn commit_tap_hold(&mut self, button: ButtonId, enabled: bool) -> StateEvents {
+        let edit = if enabled {
+            HoldEdit::Enable
+        } else {
+            HoldEdit::Disable
+        };
+        self.commit_hold_edit(button, edit)
+    }
+
+    /// Set what holding `button` does.
+    pub fn commit_hold_action(&mut self, button: ButtonId, action: Action) -> StateEvents {
+        self.commit_hold_edit(button, HoldEdit::Action(action))
+    }
+
+    /// Set how long `button` must be held, in milliseconds.
+    pub fn commit_hold_time(&mut self, button: ButtonId, ms: u16) -> StateEvents {
+        let events = self.for_current_device(StateEvent::BindingsChanged);
+        match HoldThreshold::try_from(ms) {
+            Ok(hold) => self.commit_hold_edit(button, HoldEdit::Time(hold)),
+            Err(error) => {
+                debug!(%error, "hold time out of range — not stored");
+                events
+            }
+        }
+    }
+
+    fn commit_hold_edit(&mut self, button: ButtonId, edit: HoldEdit) -> StateEvents {
+        let events = self.for_current_device(StateEvent::BindingsChanged);
+        if !self.can_edit_hold(button) {
+            debug!(?button, "tap and hold is not editable here");
+            return events;
+        }
+        let Some(key) = self
+            .current_record()
+            .and_then(DeviceRecord::persistent_config_key)
+            .map(str::to_string)
+        else {
+            return events;
+        };
+        let short = self
+            .bindings
+            .button_bindings
+            .get(&button)
+            .cloned()
+            .unwrap_or_else(|| default_binding_on(self.current_gaming_layout(), button));
+        let next = edit.apply(short.clone(), self.bindings.long_presses.get(&button));
+        let app = self.editing_app().map(str::to_string);
+        self.config.edit(|config| match (app, next) {
+            (_, HoldChange::Unchanged) => {}
+            (Some(app), HoldChange::Pair(binding)) => {
+                set_per_app_long_press(config, &key, &app, button, binding);
+            }
+            (Some(app), HoldChange::Single) => {
+                config.set_per_app_binding(&key, &app, button, Some(short));
+            }
+            (None, HoldChange::Pair(binding)) => {
+                config.set_binding(&key, button, Binding::LongPress(binding));
+            }
+            (None, HoldChange::Single) => config.set_binding(&key, button, Binding::Single(short)),
+        });
+        self.refresh_binding_projections();
+        self.persist_and_reload("tap and hold");
         events
     }
 

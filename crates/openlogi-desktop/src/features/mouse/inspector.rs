@@ -11,10 +11,11 @@ use gpui::{
 use gpui_base::Button as BaseButton;
 use gpui_component::{
     Disableable as _, Icon, IconName, Selectable as _, Sizable as _, button::Button, h_flex,
-    input::InputState, scroll::ScrollableElement as _, v_flex,
+    input::InputState, scroll::ScrollableElement as _, slider::Slider, v_flex,
 };
 use openlogi_core::binding::{
-    Action, ButtonId, GamingLayout, GestureDirection, default_binding, default_binding_on,
+    Action, ButtonId, GamingLayout, GestureDirection, LongPressBinding, default_binding,
+    default_binding_on,
 };
 
 use super::force_sensing::{PressForce, force_sensing_row};
@@ -27,7 +28,9 @@ use crate::features::binding_editor::{
 };
 use crate::state::{AppOverrides, AppState};
 use crate::ui::action::localized_action_label;
+use crate::ui::commit_slider::{CommitSlider, SliderRange};
 use crate::ui::components::{MenuRow, Toggle, control_button, control_input, toggle_row};
+use crate::ui::slider_row::SliderRow;
 use crate::ui::theme::{self, ACCENT_BLUE, Palette, Typography as _};
 
 pub(super) const INSPECTOR_W: f32 = 328.;
@@ -56,11 +59,56 @@ pub(super) struct BindingInspectorData<'a> {
     pub extra_actions: &'a [Action],
     /// Catalog actions the picker leaves out.
     pub hidden_actions: &'a [Action],
+    /// Buttons with a tap and a hold action in the open profile.
+    pub long_presses: &'a BTreeMap<ButtonId, LongPressBinding>,
+    /// Whether the selected button may take a hold action in the open
+    /// profile ([`AppState::can_edit_hold`]).
+    pub hold_editable: bool,
+    /// The hold time slider of the selected button.
+    pub hold_slider: Option<&'a CommitSlider<u16>>,
+}
+
+/// The hold time slider's range, in milliseconds. The ends are the config's
+/// own bounds ([`HoldThreshold`](openlogi_core::binding::HoldThreshold)).
+pub(super) fn hold_range() -> SliderRange<u16> {
+    SliderRange::new(
+        openlogi_core::binding::HoldThreshold::MIN_MS,
+        openlogi_core::binding::HoldThreshold::MAX_MS,
+    )
+    .step(100.)
+}
+
+/// A hold time in seconds to one decimal, such as `1.0`.
+pub(super) fn hold_seconds(ms: u16) -> String {
+    let tenths = (u32::from(ms) + 50) / 100;
+    format!("{}.{}", tenths / 10, tenths % 10)
+}
+
+/// A tap-and-hold button's card text: its tap action, then what holding does.
+pub(super) fn tap_hold_label(tap: &str, binding: &LongPressBinding) -> gpui::SharedString {
+    let hold = tr!(
+        "actions.hold_summary",
+        seconds => hold_seconds(u16::try_from(binding.threshold().as_millis()).unwrap_or(u16::MAX)),
+        action => localized_action_label(binding.long()).to_string()
+    );
+    format!("{tap} · {hold}").into()
+}
+
+/// Which action of a tap-and-hold button the open picker chooses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum PickSlot {
+    /// The action of a tap, or the button's only action.
+    #[default]
+    Tap,
+    /// The action of a hold.
+    Hold,
 }
 
 #[derive(Clone, Copy)]
 pub(super) struct ActionPickerContext<'a> {
     pub open: bool,
+    /// Which action the open picker chooses.
+    pub slot: PickSlot,
     pub search: &'a Entity<InputState>,
     pub shortcut_input: &'a Entity<InputState>,
     pub application_input: &'a Entity<InputState>,
@@ -212,9 +260,22 @@ fn button_inspector(
         .get(&button)
         .cloned()
         .unwrap_or_else(|| default_binding_on(data.layout, button));
+    let long_press = data.long_presses.get(&button);
+    let slot = if long_press.is_some() {
+        picker.slot
+    } else {
+        PickSlot::Tap
+    };
+    let chosen = match (slot, long_press) {
+        (PickSlot::Hold, Some(long_press)) => long_press.long().clone(),
+        _ => action.clone(),
+    };
     let observer = picker.view.clone();
     let on_pick: PickFn = Rc::new(move |action, _window, cx| {
-        AppState::apply(cx, |state| state.commit_binding(button, action));
+        AppState::apply(cx, |state| match slot {
+            PickSlot::Tap => state.commit_binding(button, action),
+            PickSlot::Hold => state.commit_hold_action(button, action),
+        });
         observer.update(cx, |view, cx| {
             view.close_action_picker();
             cx.notify();
@@ -228,7 +289,13 @@ fn button_inspector(
             Some(button_status(button, &action, data, overridden)),
             pal,
         ))
-        .child(current_action_card(&action, picker, pal))
+        .child(match long_press {
+            Some(long_press) => tap_hold_editor(&action, long_press, data, picker, pal),
+            None => current_action_card(&action, picker, pal).into_any_element(),
+        })
+        .when(data.hold_editable, |panel| {
+            panel.child(tap_hold_row(button, long_press.is_some(), picker.view, pal))
+        })
         .children(wheel_hold_section(
             button,
             data,
@@ -286,7 +353,7 @@ fn button_inspector(
         .when(picker.open, |panel| {
             panel.child(action_library(
                 "inspector-action",
-                Some(&action),
+                Some(&chosen),
                 picker,
                 ActionOffer {
                     extra: data.extra_actions,
@@ -297,6 +364,73 @@ fn button_inspector(
                 cx,
             ))
         })
+}
+
+/// A tap-and-hold button's two action cards and its hold time.
+fn tap_hold_editor(
+    tap: &Action,
+    long_press: &LongPressBinding,
+    data: &BindingInspectorData<'_>,
+    picker: ActionPickerContext<'_>,
+    pal: Palette,
+) -> gpui::AnyElement {
+    let committed = u16::try_from(long_press.threshold().as_millis()).unwrap_or(u16::MAX);
+    v_flex()
+        .gap_3()
+        .child(selection_card(
+            "inspector-tap-action",
+            tr!("actions.tap_action"),
+            action_icon_path(tap),
+            localized_action_label(tap),
+            PickSlot::Tap,
+            picker,
+            pal,
+        ))
+        .child(selection_card(
+            "inspector-hold-action",
+            tr!("actions.hold_action"),
+            action_icon_path(long_press.long()),
+            localized_action_label(long_press.long()),
+            PickSlot::Hold,
+            picker,
+            pal,
+        ))
+        .children(data.hold_slider.map(|slider| {
+            SliderRow::new(
+                tr!("actions.hold_time"),
+                Slider::new(slider.slider()).horizontal(),
+            )
+            .value(
+                format!("{} s", hold_seconds(slider.shown(committed))),
+                ["3.0 s"],
+            )
+        }))
+        .into_any_element()
+}
+
+/// The switch that gives a button a second action for holding it.
+fn tap_hold_row(
+    button: ButtonId,
+    enabled: bool,
+    view: &Entity<MouseModelView>,
+    pal: Palette,
+) -> impl IntoElement {
+    let observer = view.clone();
+    toggle_row(
+        "inspector-tap-hold-row",
+        pal,
+        tr!("actions.tap_and_hold"),
+        tr!("actions.tap_and_hold_description"),
+        Toggle::new("inspector-tap-hold-toggle")
+            .selected(enabled)
+            .on_change(move |enabled, _window, cx| {
+                AppState::apply(cx, |state| state.commit_tap_hold(button, *enabled));
+                observer.update(cx, |view, cx| {
+                    view.close_action_picker();
+                    cx.notify();
+                });
+            }),
+    )
 }
 
 /// The heading's status line. A button that holds the wheel is customized
@@ -634,6 +768,7 @@ fn thumbwheel_inspector(
             tr!("common.preset"),
             current_icon,
             current_label,
+            PickSlot::Tap,
             picker,
             pal,
         ))
@@ -727,6 +862,7 @@ fn current_action_card(
         tr!("actions.current_action"),
         action_icon_path(action),
         localized_action_label(action),
+        PickSlot::Tap,
         picker,
         pal,
     )
@@ -738,6 +874,7 @@ fn gesture_summary_card(picker: ActionPickerContext<'_>, pal: Palette) -> impl I
         tr!("actions.current_action"),
         GESTURE_BUTTON_ICON,
         tr!("actions.five_directions"),
+        PickSlot::Tap,
         picker,
         pal,
     )
@@ -748,17 +885,19 @@ fn selection_card(
     caption: gpui::SharedString,
     icon: &'static str,
     value: gpui::SharedString,
+    slot: PickSlot,
     picker: ActionPickerContext<'_>,
     pal: Palette,
 ) -> impl IntoElement {
     let toggle = picker.view.clone();
     let search = picker.search.clone();
-    let opening = !picker.open;
+    let open = picker.open && picker.slot == slot;
+    let opening = !open;
     let accessible_label = value.clone();
     BaseButton::new(id)
         .debug_selector(move || id.to_string())
         .accessibility_label(accessible_label)
-        .aria_expanded(picker.open)
+        .aria_expanded(open)
         .flex()
         .flex_col()
         .items_stretch()
@@ -798,7 +937,7 @@ fn selection_card(
                 )
                 .child(
                     svg()
-                        .path(if picker.open {
+                        .path(if open {
                             "action-icons/chevrons-up.svg"
                         } else {
                             "action-icons/chevrons-down.svg"
@@ -816,7 +955,7 @@ fn selection_card(
                 if opening {
                     view.clear_custom_action_drafts(window, cx);
                 }
-                view.toggle_action_picker();
+                view.toggle_action_picker(slot);
                 cx.notify();
             });
         })
@@ -1045,6 +1184,8 @@ mod tests {
         ));
     }
 
+    static NO_LONG_PRESSES: BTreeMap<ButtonId, LongPressBinding> = BTreeMap::new();
+
     fn global_profile<'a>(
         bindings: &'a BTreeMap<ButtonId, Action>,
         gesture_maps: &'a BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>>,
@@ -1064,6 +1205,9 @@ mod tests {
             editing_app: None,
             overridden: None,
             press_force: None,
+            long_presses: &NO_LONG_PRESSES,
+            hold_editable: false,
+            hold_slider: None,
         }
     }
 
