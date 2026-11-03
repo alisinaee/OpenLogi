@@ -3,8 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use openlogi_core::binding::{
-    Action, AppSwitcherBinding, AppSwitcherParams, Binding, ButtonId, GamingLayout, GestureDirection, HoldThreshold, KeypadPage,
-    LONG_PRESS_THRESHOLD, LongPressBinding, PerAppBinding, StepPx, WheelHoldBinding, default_binding_on,
+    Action, AppSwitcherBinding, AppSwitcherParams, Binding, ButtonId, GamingLayout,
+    GestureDirection, HoldThreshold, KeypadPage, LONG_PRESS_THRESHOLD, LongPressBinding,
+    PerAppBinding, StepPx, WheelHoldBinding, default_binding_on,
 };
 use openlogi_core::bindings::{
     bindings_for, button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
@@ -185,16 +186,15 @@ impl BindingState {
             })
             .collect()
         };
-        self.app_switchers = if self.editing_gshift(persistent_key)
-            || self.editing_app(persistent_key).is_some()
-        {
-            BTreeMap::new()
-        } else {
-            button_bindings_for(config, persistent_key, None, layout)
-                .into_iter()
-                .filter_map(|(button, binding)| Some((button, binding.app_switcher()?)))
-                .collect()
-        };
+        self.app_switchers =
+            if self.editing_gshift(persistent_key) || self.editing_app(persistent_key).is_some() {
+                BTreeMap::new()
+            } else {
+                button_bindings_for(config, persistent_key, None, layout)
+                    .into_iter()
+                    .filter_map(|(button, binding)| Some((button, binding.app_switcher()?)))
+                    .collect()
+            };
         self.button_bindings = button_bindings;
         self.gesture_bindings = gesture_bindings;
         self.wheel_hold_buttons = persistent_key.map_or_else(BTreeSet::new, |key| {

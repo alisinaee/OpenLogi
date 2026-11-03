@@ -606,7 +606,8 @@ impl Render for SettingsView {
                 },
                 self.momentum_panel.clone(),
                 self.registration_status,
-                AppState::try_read(cx).is_none_or(|state| state.app_settings().show_desktop_switcher),
+                AppState::try_read(cx)
+                    .is_none_or(|state| state.app_settings().show_desktop_switcher),
             ))
             .page(updates::updates_page(self.updater.clone()));
         // Registered only where grants exist to manage — see the `mod

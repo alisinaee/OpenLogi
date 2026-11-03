@@ -517,8 +517,9 @@ impl MouseModelView {
         self.hold_slider.sync(committed, window, cx);
         self.app_switcher.sync(button, switcher, window, cx);
         let editable = switcher.is_none()
-            && button
-                .is_some_and(|button| AppState::try_read(cx).is_some_and(|s| s.can_edit_hold(button)));
+            && button.is_some_and(|button| {
+                AppState::try_read(cx).is_some_and(|s| s.can_edit_hold(button))
+            });
         (editable, switcher)
     }
 

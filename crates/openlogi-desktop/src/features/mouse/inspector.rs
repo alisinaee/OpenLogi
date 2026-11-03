@@ -14,8 +14,8 @@ use gpui_component::{
     input::InputState, scroll::ScrollableElement as _, slider::Slider, v_flex,
 };
 use openlogi_core::binding::{
-    Action, AppSwitcherParams, ButtonId, GamingLayout, GestureDirection, LongPressBinding, default_binding,
-    default_binding_on,
+    Action, AppSwitcherParams, ButtonId, GamingLayout, GestureDirection, LongPressBinding,
+    default_binding, default_binding_on,
 };
 
 use super::app_switcher::AppSwitcherControls;
@@ -306,9 +306,11 @@ fn button_inspector(
                     .child(tr!("actions.app_switcher_description")),
             )
         })
-        .children(data.app_switcher.zip(data.hold_slider).map(
-            |((controls, params), hold_slider)| controls.panel(params, hold_slider),
-        ))
+        .children(
+            data.app_switcher
+                .zip(data.hold_slider)
+                .map(|((controls, params), hold_slider)| controls.panel(params, hold_slider)),
+        )
         .when(data.hold_editable, |panel| {
             panel.child(tap_hold_row(button, long_press.is_some(), picker.view, pal))
         })

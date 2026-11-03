@@ -645,7 +645,11 @@ fn app_switcher_tunables_are_stored_only_while_they_differ_from_the_defaults() {
     assert_eq!(state.button_bindings()[&button], Action::AppSwitcher);
 
     let _ = state.commit_app_switcher_step(button, 5);
-    assert_eq!(state.app_switchers()[&button].step().get(), 120, "out of range");
+    assert_eq!(
+        state.app_switchers()[&button].step().get(),
+        120,
+        "out of range"
+    );
 
     let _ = state.commit_app_switcher_step(button, StepPx::DEFAULT.get());
     let _ = state.commit_app_switcher_hold(button, 250);

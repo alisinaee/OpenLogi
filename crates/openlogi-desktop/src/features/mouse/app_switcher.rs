@@ -82,8 +82,7 @@ impl AppSwitcherControls {
         self.step_slider.sync(params.step().get(), window, cx);
         self.step_entry
             .sync(self.step_slider.shown(params.step().get()), window, cx);
-        self.hold_entry
-            .sync(hold_ms(params), window, cx);
+        self.hold_entry.sync(hold_ms(params), window, cx);
     }
 
     /// The editable step and hold time of the selected app switcher button.

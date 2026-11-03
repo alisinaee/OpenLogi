@@ -2,9 +2,9 @@
 
 use super::{
     App, AppState, Entity, FluentBuilder, IconName, IndexPath, InputState, InteractiveElement,
-    ParentElement, SelectItem, SelectState, SettingField, SettingGroup, SettingItem,
-    SettingPage, SharedString, SliderState, Styled, ThumbwheelSensitivity,
-    VerticalScrollSensitivity, div, px, theme,
+    ParentElement, SelectItem, SelectState, SettingField, SettingGroup, SettingItem, SettingPage,
+    SharedString, SliderState, Styled, ThumbwheelSensitivity, VerticalScrollSensitivity, div, px,
+    theme,
 };
 use crate::ui::commit_slider::SliderUnit;
 use crate::ui::components::control_select;
@@ -281,7 +281,9 @@ fn desktop_switcher_show_apps_item(show_desktop_switcher: bool) -> SettingItem {
     SettingItem::new(
         tr!("app.desktop_switcher_show_apps"),
         SettingField::switch(
-            |cx| AppState::try_read(cx).is_some_and(|s| s.app_settings().desktop_switcher_show_apps),
+            |cx| {
+                AppState::try_read(cx).is_some_and(|s| s.app_settings().desktop_switcher_show_apps)
+            },
             |enabled, cx| {
                 AppState::apply(cx, |state| state.commit_desktop_switcher_show_apps(enabled));
             },

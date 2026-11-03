@@ -12,11 +12,11 @@
 
 use std::sync::Arc;
 
+use gpui::Entity;
 use gpui::{
     AnyElement, App, Div, FontFeatures, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, SharedString, Styled, Window, div, px,
 };
-use gpui::Entity;
 use gpui_component::input::InputState;
 use gpui_component::slider::{Slider, SliderState};
 use gpui_component::{h_flex, v_flex};
