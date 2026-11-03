@@ -13,6 +13,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use openlogi_core::config::AppSettings;
+use openlogi_core::desktop_schema::DesktopSchema;
 use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus};
 use openlogi_ipc::{
     DESKTOP_SWITCH_FADE, DESKTOP_SWITCH_HOLD, Generation, Notice, NoticeKind, NoticeObservation,
@@ -73,9 +74,19 @@ impl NoticeBoard {
     /// Show where a desktop switch left the display, replacing the switcher
     /// already on show, until its hold and fade are over. Callable from any
     /// thread: it takes a short lock and never waits.
-    pub fn post_desktop_switch(&self, count: u16, current: u16, language: Option<String>) {
+    pub fn post_desktop_switch(
+        &self,
+        count: u16,
+        current: u16,
+        schema: Option<DesktopSchema>,
+        language: Option<String>,
+    ) {
         self.post_for(
-            NoticeKind::DesktopSwitch { count, current },
+            NoticeKind::DesktopSwitch {
+                count,
+                current,
+                schema,
+            },
             language,
             DESKTOP_SWITCH_HOLD + DESKTOP_SWITCH_FADE,
         );

@@ -2384,8 +2384,9 @@ fn desktop_switch(settings: &AppSettings) -> openlogi_inject::DesktopSwitch {
 
 /// Show the desktop switcher after each confirmed Previous or Next Desktop
 /// switch, unless the user turned [`AppSettings::show_desktop_switcher`] off.
-/// The switch reports from its own thread, so the observer only posts a
-/// notice.
+/// The boxes also map their desktops while
+/// [`AppSettings::desktop_switcher_show_apps`] is on. The switch reports from
+/// its own thread, so the observer only posts a notice.
 fn set_desktop_switcher(observable: &Arc<ObservableState>, settings: &AppSettings) {
     let observer = settings.show_desktop_switcher.then(|| {
         let observable = Arc::clone(observable);
@@ -2394,10 +2395,14 @@ fn set_desktop_switcher(observable: &Arc<ObservableState>, settings: &AppSetting
             observable.notices().post_desktop_switch(
                 position.count,
                 position.current,
+                position.schema,
                 language.clone(),
             );
         }) as openlogi_inject::DesktopObserver
     });
+    openlogi_inject::set_desktop_schema(
+        settings.show_desktop_switcher && settings.desktop_switcher_show_apps,
+    );
     openlogi_inject::set_desktop_observer(observer);
 }
 

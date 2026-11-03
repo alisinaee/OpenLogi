@@ -117,6 +117,8 @@ pub(super) struct SpaceState {
     pub current: u64,
     /// Mission Control order, including fullscreen Spaces. Never sort by ID.
     pub ordered: Vec<u64>,
+    /// The entries of `ordered` that are an app's full-screen Space.
+    pub fullscreen: Vec<u64>,
 }
 
 impl SpaceState {

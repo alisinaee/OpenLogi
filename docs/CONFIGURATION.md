@@ -151,6 +151,14 @@ optional physical device key.
   last desktop it shows the unchanged position. With the setting off nothing
   shows.
   A change applies from the next switch. Windows and Linux ignore the setting.
+- `desktop_switcher_show_apps` (default `true`, macOS only): each box of the
+  desktop switcher also maps its desktop. The windows on it show as outlines
+  scaled from their real frames and tinted per app, with the icons of the (up
+  to three) apps that take the most room; a full-screen desktop shows its app's
+  icon and name. It reads window frames and owners only, never window titles,
+  so it needs no Screen Recording permission. If the windows cannot be read in
+  time the boxes stay plain numbers. Needs `show_desktop_switcher`; there is no
+  toggle in the GUI yet, so edit the file.
 
 `[devices."<physical-key>"]` contains per-device state. Receiver keys look like
 `receiver:<receiver-id>:slot:<number>`; direct, raw-HID, and camera devices use

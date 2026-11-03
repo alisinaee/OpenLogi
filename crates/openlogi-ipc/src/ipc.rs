@@ -15,6 +15,7 @@ use std::time::Duration;
 use openlogi_core::app::ForegroundApp;
 use openlogi_core::binding::{ActionRingIcon, ActionRingSlot};
 use openlogi_core::config::{ConfigRevision, FlowPeerName, FlowPublicKey, Lighting};
+use openlogi_core::desktop_schema::DesktopSchema;
 use openlogi_core::device::{
     BatteryInfo, ChangedOnLight, DeviceInventory, DeviceKind, LightState, LockKey, StandaloneDevice,
 };
@@ -178,7 +179,8 @@ pub use succession::Identity;
 ///      confirm_flow_pairing, cancel_flow_pairing, stop_flow_pairing}`
 ///      appended after those — pairing another computer for Flow.
 ///      `NoticeKind::DesktopSwitch` appended — the overlay's desktop switcher
-///      after Previous Desktop or Next Desktop on macOS.
+///      after Previous Desktop or Next Desktop on macOS, with its
+///      `DesktopSchema` — the apps and window frames of each desktop.
 pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the
@@ -878,6 +880,10 @@ pub enum NoticeKind {
         count: u16,
         /// The current desktop, counted from 1.
         current: u16,
+        /// What each desktop holds, for the boxes to map. `None` draws plain
+        /// numbers: the user turned it off, or the windows could not be read
+        /// in time.
+        schema: Option<DesktopSchema>,
     },
 }
 

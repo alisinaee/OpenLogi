@@ -37,12 +37,16 @@ objc2-app-kit = { workspace = true, features = [
   "objc2-core-graphics",
   "NSWorkspace",
   "NSRunningApplication",
+  "NSImage",
+  "NSImageRep",
+  "NSBitmapImageRep",
+  "libc",
   "NSMenu",
   "NSMenuItem",
   "NSApplication",
   "NSResponder",
 ] }
-objc2-core-graphics = { workspace = true, features = ["CGDirectDisplay", "CGError", "CGEvent", "CGEventTypes"] }
+objc2-core-graphics = { workspace = true, features = ["CGDirectDisplay", "CGError", "CGEvent", "CGEventTypes", "CGWindow", "CGImage"] }
 objc2-foundation = { workspace = true }
 objc2-io-kit = { workspace = true, features = ["std", "hid", "hidsystem"] }
 objc2-application-services = { workspace = true, features = ["std", "HIServices", "AXUIElement", "AXError", "libc"] }

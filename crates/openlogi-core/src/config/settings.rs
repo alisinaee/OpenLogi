@@ -409,6 +409,13 @@ impl Default for WheelFeel {
             duration: Duration::from_millis(u64::from(Self::DURATION_MS_DEFAULT)),
         }
     }
+    /// Whether each box of the desktop switcher also maps its desktop: its
+    /// windows as outlines tinted per app, and the icons of the apps with the
+    /// most room. **On by default.** Needs [`Self::show_desktop_switcher`];
+    /// reads window frames only, never titles. Only macOS reads it. There is
+    /// no toggle for it in the GUI yet.
+    #[serde(default = "default_true")]
+    pub desktop_switcher_show_apps: bool,
 }
 
 const SENSITIVITY_MIN: u8 = 1;
@@ -634,6 +641,7 @@ impl Default for AppSettings {
             scroll_acceleration: true,
             smooth_wheel_duration_ms: WheelFeel::DURATION_MS_DEFAULT,
             smooth_wheel_easing: WheelEasing::Smooth,
+            desktop_switcher_show_apps: true,
         }
     }
 }

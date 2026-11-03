@@ -39,6 +39,9 @@ use openlogi_core::binding::{
 use openlogi_core::config::{
     ConfigRevision, FlowPeerName, FlowPublicKey, Lighting, ScrollResolution,
 };
+use openlogi_core::desktop_schema::{
+    DesktopSchema, SchemaApp, SchemaWindow, SpaceSchema, UnitRect,
+};
 use openlogi_core::device::{
     BatteryInfo, BatteryLevel, BatteryStatus, Capabilities, ChangedOnLight, DeviceInventory,
     DeviceKind, DeviceModelInfo, DeviceTransports, LightCapabilities, LightState, LightValueRange,
@@ -452,11 +455,45 @@ fn notices() {
                 kind: NoticeKind::DesktopSwitch {
                     count: 5,
                     current: 2,
+                    schema: None,
                 },
             }],
             language: None,
         },
-        "04010901050200",
+        "0401090105020000",
+    );
+    assert_wire(
+        &NoticeObservation {
+            generation: 4,
+            notices: vec![Notice {
+                id: 9,
+                kind: NoticeKind::DesktopSwitch {
+                    count: 2,
+                    current: 1,
+                    schema: Some(DesktopSchema {
+                        apps: vec![SchemaApp {
+                            id: "a.b".into(),
+                            name: "AB".into(),
+                            icon: None,
+                        }],
+                        spaces: vec![SpaceSchema {
+                            fullscreen: true,
+                            windows: vec![SchemaWindow {
+                                app: 0,
+                                frame: UnitRect {
+                                    x: 1,
+                                    y: 2,
+                                    width: 3,
+                                    height: 4,
+                                },
+                            }],
+                        }],
+                    }),
+                },
+            }],
+            language: None,
+        },
+        "040109010201010103612e6202414200010101000102030400",
     );
 }
 

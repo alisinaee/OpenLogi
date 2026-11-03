@@ -47,6 +47,7 @@ files; **keep this table in sync when you add or move one**:
 | `openlogi-inject/src/inject/macos/browser.rs` | Safari's toolbar-button navigation over `ax.rs`, and the off-thread `NSWorkspace` Safari validation |
 | `openlogi-inject/src/inject/macos/menu_shortcut.rs` | the hidden probe `NSMenu` AppKit remaps for the keyboard layout, and pressing the frontmost app's matching menu item through AX |
 | `openlogi-inject/src/inject/macos/{app_services,dock,symbolic_hotkey}.rs` | the `dlopen`'d private SPIs: `CoreDockSendNotification` and the CGS symbolic-hotkey trio |
+| `openlogi-inject/src/inject/macos/spaces/schema.rs` | the desktop switcher's read of each Space's windows: the `dlsym`'d SkyLight `SLSCopyWindowsWithOptionsAndTags` (Copy-rule `CFArray` adopted once), `CGWindowListCopyWindowInfo` dictionaries (frames and owners, never titles), `NSRunningApplication` lookups, and the `NSWorkspace` icon rendered to a PNG through `CGImageForProposedRect` and `NSBitmapImageRep` |
 | `openlogi-inject/src/inject/macos/keyboard_layout.rs` | the active keyboard layout's `uchr` data (Text Input Source Services, read on the main thread) and `UCKeyTranslate` over it |
 | `openlogi-inject/src/inject/macos/main_thread.rs` | the bounded hand-off of main-thread work from the action worker to the main queue (`dispatch2`) |
 | `openlogi-inject/src/inject/macos/virtual_keyboard/device.rs` | the `IOHIDUserDevice` virtual keyboard that key synthesis types through: its creation (which needs the `com.apple.developer.hid.virtual.device` entitlement) and its timestamped input reports. The report state in `virtual_keyboard.rs` above it is safe code |
@@ -285,6 +286,10 @@ under a `SAFETY` comment. Where it currently lives on macOS:
   the main thread: AppKit remaps an item for the keyboard layout only once the
   run loop has turned with it in the main menu, so the agent installs the probes
   before `NSApplication::run`, and workers read them through `main_thread.rs`.
+- `inject/macos/spaces/schema.rs` — the SkyLight window-copy call (pointer and
+  tag out-parameters, Copy-rule adoption), the unchecked cast of window-list
+  arrays to `CFArray<CFType>`, and `CGImageForProposedRect` with a null
+  context and hints.
 - `inject/macos/keyboard_layout.rs` — the input-source copy and property read,
   `LMGetKbdType`, and `UCKeyTranslate` over the copied `uchr` bytes. Text Input
   Source Services must run on the main thread (HIToolbox crashes when another
