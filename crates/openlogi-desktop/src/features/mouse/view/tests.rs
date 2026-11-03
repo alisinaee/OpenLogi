@@ -443,6 +443,7 @@ fn a_selected_gesture_can_render_in_the_binding_inspector(cx: &mut TestAppContex
                 long_presses: &BTreeMap::new(),
                 hold_editable: false,
                 hold_slider: None,
+                app_switcher: None,
             },
             ActionPickerContext {
                 open: true,

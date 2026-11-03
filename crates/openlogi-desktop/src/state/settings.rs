@@ -441,6 +441,19 @@ impl AppState {
         self.persist_and_reload("desktop switcher overlay setting");
         StateEvent::SettingsChanged.into()
     }
+    /// Toggle the window map inside the desktop switcher and persist it. The
+    /// agent reads the new value on config reload. An already-set value
+    /// writes nothing and is still reported; disk failures restore the
+    /// persisted value.
+    pub fn commit_desktop_switcher_show_apps(&mut self, enabled: bool) -> StateEvents {
+        if self.config.app_settings.desktop_switcher_show_apps == enabled {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.desktop_switcher_show_apps = enabled);
+        self.persist_and_reload("desktop switcher apps setting");
+        StateEvent::SettingsChanged.into()
+    }
     /// Toggle macOS acceleration of the smoothed wheel and persist it. The
     /// agent reads the new value on config reload. An already-set value
     /// writes nothing and is still reported; disk failures restore the

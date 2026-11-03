@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use openlogi_core::binding::{
-    Action, Binding, ButtonId, GamingLayout, GestureDirection, HoldThreshold, KeypadPage,
-    LONG_PRESS_THRESHOLD, LongPressBinding, PerAppBinding, WheelHoldBinding, default_binding_on,
+    Action, AppSwitcherBinding, AppSwitcherParams, Binding, ButtonId, GamingLayout, GestureDirection, HoldThreshold, KeypadPage,
+    LONG_PRESS_THRESHOLD, LongPressBinding, PerAppBinding, StepPx, WheelHoldBinding, default_binding_on,
 };
 use openlogi_core::bindings::{
     bindings_for, button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
@@ -86,6 +86,9 @@ pub(super) struct BindingState {
     /// Buttons with a tap and a hold action in the open profile: the global
     /// ones, overlaid by the app profile's own overrides.
     long_presses: BTreeMap<ButtonId, LongPressBinding>,
+    /// The tunables of the buttons bound to the app switcher in the global
+    /// profile. A per-app entry holds one action, so it never carries any.
+    app_switchers: BTreeMap<ButtonId, AppSwitcherParams>,
     /// Global keyboard F-key bindings (Esc + F1-F19).
     keyboard_bindings: BTreeMap<KeyTrigger, Action>,
 }
@@ -103,6 +106,7 @@ impl BindingState {
             gesture_bindings: BTreeMap::new(),
             wheel_hold_buttons: BTreeSet::new(),
             long_presses: BTreeMap::new(),
+            app_switchers: BTreeMap::new(),
             keyboard_bindings: config.keyboard.bindings.clone(),
         };
         state.refresh_device(config, persistent_key, layout);
@@ -181,6 +185,16 @@ impl BindingState {
             })
             .collect()
         };
+        self.app_switchers = if self.editing_gshift(persistent_key)
+            || self.editing_app(persistent_key).is_some()
+        {
+            BTreeMap::new()
+        } else {
+            button_bindings_for(config, persistent_key, None, layout)
+                .into_iter()
+                .filter_map(|(button, binding)| Some((button, binding.app_switcher()?)))
+                .collect()
+        };
         self.button_bindings = button_bindings;
         self.gesture_bindings = gesture_bindings;
         self.wheel_hold_buttons = persistent_key.map_or_else(BTreeSet::new, |key| {
@@ -249,6 +263,16 @@ fn set_per_app_long_press(
         .entry(app.to_string())
         .or_default()
         .insert(button, PerAppBinding::LongPress(binding));
+}
+
+/// The binding of an app switcher with `params`: the plain action while they
+/// are the defaults, the table form otherwise.
+fn app_switcher_binding(params: AppSwitcherParams) -> Binding {
+    if params.step() == StepPx::DEFAULT && params.hold() == AppSwitcherParams::default().hold() {
+        Binding::Single(Action::AppSwitcher)
+    } else {
+        Binding::AppSwitcher(AppSwitcherBinding::new(params))
+    }
 }
 
 /// One edit of a button's tap-and-hold pair.
@@ -551,6 +575,66 @@ impl AppState {
         &self.bindings.long_presses
     }
 
+    /// The app switcher tunables of the buttons bound to it in the global
+    /// profile; empty while an app profile or the G-Shift layer is open.
+    #[must_use]
+    pub fn app_switchers(&self) -> &BTreeMap<ButtonId, AppSwitcherParams> {
+        &self.bindings.app_switchers
+    }
+
+    /// Set how far the mouse travels sideways per app on `button`'s app
+    /// switcher, in raw counts.
+    pub fn commit_app_switcher_step(&mut self, button: ButtonId, step: u16) -> StateEvents {
+        match StepPx::try_from(step) {
+            Ok(step) => self.commit_app_switcher(button, |params| {
+                AppSwitcherParams::new(Some(step), Some(params.hold_threshold()))
+            }),
+            Err(error) => {
+                debug!(%error, "app switcher step out of range — not stored");
+                self.for_current_device(StateEvent::BindingsChanged)
+            }
+        }
+    }
+
+    /// Set how long `button`'s app switcher must be held, in milliseconds.
+    pub fn commit_app_switcher_hold(&mut self, button: ButtonId, ms: u16) -> StateEvents {
+        match HoldThreshold::try_from(ms) {
+            Ok(hold) => self.commit_app_switcher(button, |params| {
+                AppSwitcherParams::new(Some(params.step()), Some(hold))
+            }),
+            Err(error) => {
+                debug!(%error, "app switcher hold out of range — not stored");
+                self.for_current_device(StateEvent::BindingsChanged)
+            }
+        }
+    }
+
+    fn commit_app_switcher(
+        &mut self,
+        button: ButtonId,
+        edit: impl FnOnce(AppSwitcherParams) -> AppSwitcherParams,
+    ) -> StateEvents {
+        let events = self.for_current_device(StateEvent::BindingsChanged);
+        let Some(current) = self.bindings.app_switchers.get(&button).copied() else {
+            debug!(?button, "no app switcher on this button — nothing stored");
+            return events;
+        };
+        let Some(key) = self
+            .current_record()
+            .and_then(DeviceRecord::persistent_config_key)
+            .map(str::to_string)
+        else {
+            return events;
+        };
+        let params = edit(current);
+        self.config.edit(|config| {
+            config.set_binding(&key, button, app_switcher_binding(params));
+        });
+        self.refresh_binding_projections();
+        self.persist_and_reload("app switcher");
+        events
+    }
+
     /// Whether the open profile can give `button` a hold action: not the
     /// G-Shift layer, and not a button that gestures or holds the wheel in the
     /// global profile.
@@ -585,8 +669,12 @@ impl AppState {
         self.commit_hold_edit(button, HoldEdit::Action(action))
     }
 
-    /// Set how long `button` must be held, in milliseconds.
+    /// Set how long `button` must be held, in milliseconds: a tap-and-hold
+    /// button's hold, or an app switcher's.
     pub fn commit_hold_time(&mut self, button: ButtonId, ms: u16) -> StateEvents {
+        if self.bindings.app_switchers.contains_key(&button) {
+            return self.commit_app_switcher_hold(button, ms);
+        }
         let events = self.for_current_device(StateEvent::BindingsChanged);
         match HoldThreshold::try_from(ms) {
             Ok(hold) => self.commit_hold_edit(button, HoldEdit::Time(hold)),

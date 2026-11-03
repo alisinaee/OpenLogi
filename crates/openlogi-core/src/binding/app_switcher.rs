@@ -165,7 +165,9 @@ impl AppSwitcherParams {
         self.hold_threshold().duration()
     }
 
-    fn hold_threshold(self) -> HoldThreshold {
+    /// [`hold`](Self::hold) as the config's own validated hold time.
+    #[must_use]
+    pub fn hold_threshold(self) -> HoldThreshold {
         self.hold_ms.unwrap_or(HoldThreshold(DEFAULT_HOLD_MS))
     }
 

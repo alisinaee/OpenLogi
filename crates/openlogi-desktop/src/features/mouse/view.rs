@@ -14,8 +14,11 @@ use gpui_component::{
     input::{InputEvent, InputState},
     v_flex,
 };
-use openlogi_core::binding::{Action, ButtonId, GamingLayout, GestureDirection, LongPressBinding};
+use openlogi_core::binding::{
+    Action, AppSwitcherParams, ButtonId, GamingLayout, GestureDirection, LongPressBinding,
+};
 
+use super::app_switcher::{self, AppSwitcherControls};
 use super::force_sensing::{ForceSensingFacts, ForceSensingSlider, PressForce};
 use super::geometry::{
     LABEL_H, LabelDistribution, asset_dimensions_for_png, asset_has_button_labels,
@@ -203,6 +206,8 @@ pub struct MouseModelView {
     picker_slot: PickSlot,
     /// The hold time of the selected tap-and-hold button.
     hold_slider: CommitSlider<u16>,
+    /// The step and hold time of a selected app switcher button.
+    app_switcher: AppSwitcherControls,
     action_search: Entity<InputState>,
     pub(super) custom_shortcut_input: Entity<InputState>,
     pub(super) custom_application_input: Entity<InputState>,
@@ -292,6 +297,7 @@ impl MouseModelView {
                     AppState::apply(cx, |state| state.commit_hold_time(button, ms));
                 }
             }),
+            app_switcher: AppSwitcherControls::new(window, cx),
             action_search,
             custom_shortcut_input,
             custom_application_input,
@@ -492,16 +498,33 @@ impl MouseModelView {
     /// state for the frame, since the slider sync needs the context mutably.
     /// Seat the hold time slider on the selected button's hold time, and say
     /// whether that button may take a hold action.
-    fn sync_hold(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let committed = AppState::try_read(cx)
-            .zip(self.selected.and_then(MouseControlId::button))
-            .and_then(|(state, button)| state.long_presses().get(&button))
-            .and_then(|binding| u16::try_from(binding.threshold().as_millis()).ok())
-            .unwrap_or(LONG_PRESS_MS);
+    fn sync_hold(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (bool, Option<AppSwitcherParams>) {
+        let button = self.selected_button();
+        let switcher = AppState::try_read(cx)
+            .zip(button)
+            .and_then(|(state, button)| state.app_switchers().get(&button).copied());
+        let committed = switcher.map(app_switcher::hold_ms).unwrap_or_else(|| {
+            AppState::try_read(cx)
+                .zip(button)
+                .and_then(|(state, button)| state.long_presses().get(&button))
+                .and_then(|binding| u16::try_from(binding.threshold().as_millis()).ok())
+                .unwrap_or(LONG_PRESS_MS)
+        });
         self.hold_slider.sync(committed, window, cx);
-        self.selected
-            .and_then(MouseControlId::button)
-            .is_some_and(|button| AppState::try_read(cx).is_some_and(|s| s.can_edit_hold(button)))
+        self.app_switcher.sync(button, switcher, window, cx);
+        let editable = switcher.is_none()
+            && button
+                .is_some_and(|button| AppState::try_read(cx).is_some_and(|s| s.can_edit_hold(button)));
+        (editable, switcher)
+    }
+
+    /// The button the selected hotspot stands for, if any.
+    pub(super) fn selected_button(&self) -> Option<ButtonId> {
+        self.selected.and_then(MouseControlId::button)
     }
 
     fn sync_selection(
@@ -557,7 +580,7 @@ impl Render for MouseModelView {
     )]
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.localize_action_picker_inputs(window, cx);
-        let hold_editable = self.sync_hold(window, cx);
+        let (hold_editable, app_switcher) = self.sync_hold(window, cx);
         let force_sensing = self.sync_selection(window, cx);
         let MouseWorkspaceData {
             asset,
@@ -661,6 +684,7 @@ impl Render for MouseModelView {
                 long_presses,
                 hold_editable,
                 hold_slider: Some(&self.hold_slider),
+                app_switcher: app_switcher.map(|params| (&self.app_switcher, params)),
             },
             self.action_picker_context(&view),
             cx,

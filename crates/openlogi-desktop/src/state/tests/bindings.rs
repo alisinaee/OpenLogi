@@ -622,6 +622,44 @@ fn tap_and_hold_in_the_global_profile_saves_both_actions_and_the_hold_time() {
 }
 
 #[test]
+fn app_switcher_tunables_are_stored_only_while_they_differ_from_the_defaults() {
+    use openlogi_core::binding::{AppSwitcherParams, StepPx};
+
+    let mut state = state_with_a_known_mouse();
+    let button = ButtonId::DpiToggle;
+    let _ = state.commit_binding(button, Action::AppSwitcher);
+    assert_eq!(
+        state.app_switchers().get(&button),
+        Some(&AppSwitcherParams::default())
+    );
+
+    let _ = state.commit_app_switcher_step(button, 120);
+    let _ = state.commit_hold_time(button, 1000);
+    let params = state.app_switchers()[&button];
+    assert_eq!(params.step().get(), 120);
+    assert_eq!(params.hold(), std::time::Duration::from_millis(1000));
+    assert!(matches!(
+        state.config.stored_bindings(KNOWN_MOUSE_KEY).get(&button),
+        Some(Binding::AppSwitcher(_))
+    ));
+    assert_eq!(state.button_bindings()[&button], Action::AppSwitcher);
+
+    let _ = state.commit_app_switcher_step(button, 5);
+    assert_eq!(state.app_switchers()[&button].step().get(), 120, "out of range");
+
+    let _ = state.commit_app_switcher_step(button, StepPx::DEFAULT.get());
+    let _ = state.commit_app_switcher_hold(button, 250);
+    assert_eq!(
+        state.config.stored_bindings(KNOWN_MOUSE_KEY).get(&button),
+        Some(&Binding::Single(Action::AppSwitcher)),
+        "the defaults are the plain action"
+    );
+
+    let _ = state.commit_binding(button, Action::Copy);
+    assert!(state.app_switchers().is_empty());
+}
+
+#[test]
 fn tap_and_hold_in_a_per_app_profile_is_stored_beside_a_plain_global_binding() {
     let mut state = state_editing("com.apple.Safari");
     let button = ButtonId::Forward;

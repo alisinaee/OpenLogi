@@ -14,10 +14,11 @@ use gpui_component::{
     input::InputState, scroll::ScrollableElement as _, slider::Slider, v_flex,
 };
 use openlogi_core::binding::{
-    Action, ButtonId, GamingLayout, GestureDirection, LongPressBinding, default_binding,
+    Action, AppSwitcherParams, ButtonId, GamingLayout, GestureDirection, LongPressBinding, default_binding,
     default_binding_on,
 };
 
+use super::app_switcher::AppSwitcherControls;
 use super::force_sensing::{PressForce, force_sensing_row};
 use super::hotspots::MouseControlId;
 use super::thumbwheel::ThumbwheelPreset;
@@ -66,6 +67,10 @@ pub(super) struct BindingInspectorData<'a> {
     pub hold_editable: bool,
     /// The hold time slider of the selected button.
     pub hold_slider: Option<&'a CommitSlider<u16>>,
+    /// The app switcher tunables of the selected button, with the controls
+    /// that edit them, when it is bound to the app switcher in a profile that
+    /// can tune it.
+    pub app_switcher: Option<(&'a AppSwitcherControls, AppSwitcherParams)>,
 }
 
 /// The hold time slider's range, in milliseconds. The ends are the config's
@@ -293,6 +298,17 @@ fn button_inspector(
             Some(long_press) => tap_hold_editor(&action, long_press, data, picker, pal),
             None => current_action_card(&action, picker, pal).into_any_element(),
         })
+        .when(action == Action::AppSwitcher, |panel| {
+            panel.child(
+                div()
+                    .text_body()
+                    .text_color(pal.text_muted)
+                    .child(tr!("actions.app_switcher_description")),
+            )
+        })
+        .children(data.app_switcher.zip(data.hold_slider).map(
+            |((controls, params), hold_slider)| controls.panel(params, hold_slider),
+        ))
         .when(data.hold_editable, |panel| {
             panel.child(tap_hold_row(button, long_press.is_some(), picker.view, pal))
         })
@@ -1208,6 +1224,7 @@ mod tests {
             long_presses: &NO_LONG_PRESSES,
             hold_editable: false,
             hold_slider: None,
+            app_switcher: None,
         }
     }
 
