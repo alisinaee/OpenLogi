@@ -321,6 +321,12 @@ pub struct AppSettings {
     /// Only macOS reads it.
     #[serde(default = "default_true")]
     pub show_desktop_switcher: bool,
+    /// Whether each box of the desktop switcher also maps its desktop: its
+    /// windows as outlines tinted per app, and the icons of the apps with the
+    /// most room. **On by default.** Needs [`Self::show_desktop_switcher`];
+    /// reads window frames only, never titles. Only macOS reads it.
+    #[serde(default = "default_true")]
+    pub desktop_switcher_show_apps: bool,
     /// Whether macOS may accelerate OpenLogi's smoothed wheel output, so a fast
     /// spin scrolls farther per notch than a slow one. **On by default**
     /// (today's behaviour: a smoothed wheel is posted as wheel ticks, which
@@ -409,13 +415,6 @@ impl Default for WheelFeel {
             duration: Duration::from_millis(u64::from(Self::DURATION_MS_DEFAULT)),
         }
     }
-    /// Whether each box of the desktop switcher also maps its desktop: its
-    /// windows as outlines tinted per app, and the icons of the apps with the
-    /// most room. **On by default.** Needs [`Self::show_desktop_switcher`];
-    /// reads window frames only, never titles. Only macOS reads it. There is
-    /// no toggle for it in the GUI yet.
-    #[serde(default = "default_true")]
-    pub desktop_switcher_show_apps: bool,
 }
 
 const SENSITIVITY_MIN: u8 = 1;
