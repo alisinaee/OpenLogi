@@ -14,7 +14,7 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
-use openlogi_core::binding::{Action, Binding, ButtonId};
+use openlogi_core::binding::{Action, AppSwitcherParams, Binding, ButtonId, LongPressBinding};
 use tracing::warn;
 
 use super::ActionDispatchTarget;
@@ -174,6 +174,9 @@ pub(crate) struct ActivePress {
     token: PressToken,
     behavior: PressBehavior,
     target: ActionDispatchTarget,
+    /// The tunables of the app switcher this press belongs to, so the hold
+    /// its long action starts follows the binding's step distance.
+    app_switcher: Option<AppSwitcherParams>,
 }
 
 /// Runtime-only state of the action semantics attached to one active press.
@@ -200,18 +203,30 @@ enum PressBehavior {
 
 impl PressBehavior {
     fn new(binding: Option<&Binding>, pressed_at: Instant) -> Self {
+        let Some(binding) = binding else {
+            return Self::LifecycleOnly;
+        };
+        // An app switcher is a tap/hold button like any other long press: the
+        // binding owns the pair of actions and the hold time.
+        if let Some(params) = binding.app_switcher() {
+            return Self::long_press(&params.long_press(), pressed_at);
+        }
         match binding {
-            None => Self::LifecycleOnly,
-            Some(Binding::Single(action)) => Self::Immediate(action.clone()),
-            Some(binding @ Binding::Gesture(_)) => Self::Immediate(binding.click_action()),
-            Some(Binding::LongPress(binding)) => Self::LongPressPending {
-                short: binding.short().clone(),
-                long: binding.long().clone(),
-                deadline: pressed_at + binding.threshold(),
-            },
-            Some(Binding::WheelHold(binding)) => Self::WheelHoldPending {
+            Binding::Single(action) => Self::Immediate(action.clone()),
+            Binding::Gesture(_) => Self::Immediate(binding.click_action()),
+            Binding::LongPress(binding) => Self::long_press(binding, pressed_at),
+            Binding::WheelHold(binding) => Self::WheelHoldPending {
                 click: binding.click().clone(),
             },
+            Binding::AppSwitcher(_) => unreachable!("app_switcher() claimed it above"),
+        }
+    }
+
+    fn long_press(binding: &LongPressBinding, pressed_at: Instant) -> Self {
+        Self::LongPressPending {
+            short: binding.short().clone(),
+            long: binding.long().clone(),
+            deadline: pressed_at + binding.threshold(),
         }
     }
 
@@ -295,6 +310,11 @@ impl ActivePress {
         self.target
     }
 
+    /// The app switcher tunables of the binding that admitted this press.
+    pub(crate) fn app_switcher(&self) -> Option<AppSwitcherParams> {
+        self.app_switcher
+    }
+
     fn release_action(&self) -> Option<&Action> {
         self.behavior.release_action()
     }
@@ -341,6 +361,12 @@ pub(crate) enum ButtonRuntimeEvent {
         press: ActivePress,
         action: Action,
     },
+    /// Horizontal mouse travel reported while the press is held. Lossy: the
+    /// producer drops it rather than disturb the press when the queue is full.
+    Motion {
+        press: ActivePress,
+        dx: i16,
+    },
 }
 
 /// Inputs cannot represent `Up + action` or a source-authored `Cancel`.
@@ -358,6 +384,11 @@ enum ButtonInput {
     /// The wheel moved while the press `token` was down.
     WheelWhilePressed {
         token: PressToken,
+    },
+    /// The mouse moved sideways by `dx` while the press `token` was down.
+    MotionWhilePressed {
+        token: PressToken,
+        dx: i16,
     },
 }
 
@@ -538,6 +569,7 @@ impl ButtonInputHandle {
             PressBehavior::Immediate(action.clone()),
             generation,
             target,
+            None,
         );
         let token = press.token.clone();
         self.try_input(generation, ButtonInput::Down(press))
@@ -599,6 +631,7 @@ impl ButtonInputHandle {
             PressBehavior::new(binding, Instant::now()),
             generation,
             target,
+            binding.and_then(Binding::app_switcher),
         );
         self.try_input(generation, ButtonInput::Pulse(press))
     }
@@ -630,6 +663,26 @@ impl ButtonInputHandle {
                 token: token.clone(),
             },
         )
+    }
+
+    /// Report `dx` counts of sideways travel while `press` is down. Travel is
+    /// a stream a later report supersedes, so a full queue drops it quietly:
+    /// invalidating every press, as a lost release does, would end the very
+    /// hold the travel belongs to.
+    pub(crate) fn try_motion_while_pressed(&self, token: &PressToken, dx: i16) -> bool {
+        let generation = self.generation.load(Ordering::Acquire);
+        if token.generation != generation || !self.accepting.load(Ordering::Acquire) {
+            return false;
+        }
+        self.events
+            .try_send(ButtonCommand::Input {
+                generation,
+                input: ButtonInput::MotionWhilePressed {
+                    token: token.clone(),
+                    dx,
+                },
+            })
+            .is_ok()
     }
 
     pub(crate) fn cancel_stale_press(&self, token: &PressToken) {
@@ -679,6 +732,7 @@ impl ButtonInputHandle {
             PressBehavior::new(binding, Instant::now()),
             generation,
             target,
+            binding.and_then(Binding::app_switcher),
         );
         let token = press.token.clone();
         self.try_input(generation, ButtonInput::Down(press))
@@ -702,6 +756,7 @@ impl ButtonInputHandle {
         behavior: PressBehavior,
         generation: u64,
         target: ActionDispatchTarget,
+        app_switcher: Option<AppSwitcherParams>,
     ) -> ActivePress {
         let id = PressId(self.next_press.fetch_add(1, Ordering::Relaxed));
         ActivePress {
@@ -712,6 +767,7 @@ impl ButtonInputHandle {
             },
             behavior,
             target,
+            app_switcher,
         }
     }
 

@@ -238,7 +238,10 @@ impl InputDispatcher {
                 let is_gesture = plan.gesture_bindings.contains_key(&button)
                     || plan.side_gesture_bindings.contains_key(&button);
                 let (binding, pointer) = self.binding_for(session, plan, button, is_gesture);
-                let tracks_hold = is_gesture || binding.is_some_and(Binding::is_wheel_hold);
+                let tracks_hold = is_gesture
+                    || binding.is_some_and(|binding| {
+                        binding.is_wheel_hold() || binding.app_switcher().is_some()
+                    });
                 if let Some(binding) = binding {
                     debug!(key, ?button, action = %binding.click_action().label(), "HID++ button → binding");
                 } else {
@@ -268,6 +271,14 @@ impl InputDispatcher {
                 increments,
                 resolution,
             } => self.dispatch_wheel(session, plan, increments, resolution),
+            CapturedInput::HeldMotion { button, dx } => {
+                let Some(press) = self.held_presses.get(session, button) else {
+                    debug!(key, %button, dx, "held motion from a canceled button lifecycle — ignored");
+                    return;
+                };
+                // Lossy: a full queue or an ended press simply drops it.
+                let _ = self.outputs.actions.try_motion_while_pressed(press, dx);
+            }
             CapturedInput::HeldWheel {
                 button,
                 delta,

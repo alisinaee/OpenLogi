@@ -178,7 +178,8 @@ pub use succession::Identity;
 ///      confirm_flow_pairing, cancel_flow_pairing, stop_flow_pairing}`
 ///      appended after those — pairing another computer for Flow.
 ///      `NoticeKind::DesktopSwitch` appended — the overlay's desktop switcher
-///      after Previous Desktop or Next Desktop on macOS.
+///      after Previous Desktop or Next Desktop on macOS. `Action::AppSwitcher`
+///      and `Binding::AppSwitcher` appended — the app switcher button.
 pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the

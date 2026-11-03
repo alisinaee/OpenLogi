@@ -19,6 +19,7 @@
 //! compile rather than silently no-op-ing.
 
 use super::action::{Action, WorkflowStep};
+use super::app_switcher::{SwitchDirection, switcher_chord};
 use super::key_combo::KeyCombo;
 
 /// What firing an [`Action`] should do, independent of platform.
@@ -291,6 +292,7 @@ impl Action {
             Action::HoldShortcut(combo) | Action::TapKeyHoldingModifiers(combo) => {
                 Effect::HeldKey(combo)
             }
+            Action::AppSwitcher => Effect::HeldKey(switcher_chord(SwitchDirection::Forward)),
 
             Action::TypeText(text) => Effect::Text(text),
             Action::RunAppleScript(src) => Effect::Script(Script::AppleScript(src)),

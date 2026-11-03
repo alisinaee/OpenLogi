@@ -93,6 +93,15 @@ pub enum CapturedInput {
     /// An instantaneous firmware-reported tap with no observable hold
     /// duration, such as the thumb-wheel touch sensor.
     ButtonPulse(ButtonId),
+    /// Horizontal mouse travel while a motion-streaming button is held (see
+    /// [`CaptureSpec::motion_buttons`]). The firmware reports it over `0x1b04`
+    /// raw XY instead of moving the pointer; vertical travel is dropped here.
+    HeldMotion {
+        /// The held button the travel belongs to.
+        button: ButtonId,
+        /// Horizontal travel in sensor counts; positive is rightward.
+        dx: i16,
+    },
     /// Main-wheel movement while a wheel-hold button is held. The firmware
     /// reports it over `0x1b04` instead of scrolling, so the agent can scroll
     /// horizontally in its place.
@@ -188,6 +197,13 @@ pub struct CaptureSpec {
     /// Standard-button CIDs requested as raw-XY gesture sources. A control is
     /// armed only when its HID++ capability flags advertise raw-XY support.
     pub divert_gesture_buttons: Vec<(u16, ButtonId)>,
+    /// Buttons among [`divert_gesture_buttons`](Self::divert_gesture_buttons)
+    /// whose raw-XY travel streams out as [`CapturedInput::HeldMotion`]
+    /// instead of committing swipes: the app switcher follows the mouse
+    /// continuously rather than waiting for a direction. A control that
+    /// cannot report raw XY is armed as a plain button instead, so the
+    /// button's tap and hold still work without the travel.
+    pub motion_buttons: Vec<ButtonId>,
     /// Buttons to divert as plain presses (no raw-XY): the
     /// [`DIVERTABLE_STANDARD_BUTTONS`] and non-gesturing
     /// [`GESTURE_SOURCE_BUTTONS`] whose binding leaves the default.
@@ -262,9 +278,10 @@ struct GestureCapture {
 
 impl GestureCapture {
     fn new(armed: ArmedControls) -> Self {
+        let streaming = armed.motion_buttons.clone();
         Self {
             armed,
-            accum: Arc::default(),
+            accum: Arc::new(Mutex::new(CaptureAccum::streaming(streaming))),
             thumb_status: Arc::new(Mutex::new(RotationStatus::Inactive)),
             spy_edges: Arc::default(),
         }
@@ -398,7 +415,8 @@ impl ArmedCapture for GestureCapture {
     }
 
     fn reset_input_state(&self) {
-        *self.accum.lock().unwrap_or_else(PoisonError::into_inner) = CaptureAccum::default();
+        *self.accum.lock().unwrap_or_else(PoisonError::into_inner) =
+            CaptureAccum::streaming(self.armed.motion_buttons.clone());
         // A power cycle ends any roll in progress; carrying it over would
         // swallow the first tap after the reconnect.
         *self

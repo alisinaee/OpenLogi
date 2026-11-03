@@ -234,6 +234,18 @@ pub enum Action {
     /// Move the pressing keypad to its next binding page, wrapping from the
     /// last page to page 1. Appended — variant order is wire format.
     NextKeypadPage,
+    /// The app switcher button: a tap switches to the previous app, and a
+    /// hold opens the native app switcher and follows the mouse's sideways
+    /// movement through it, activating the highlighted app on release.
+    ///
+    /// The tap, the hold time, and the movement step belong to the button's
+    /// [`Binding`](crate::binding::Binding), not to this variant: the plain
+    /// action runs with the defaults, and `{ AppSwitcher = { step, hold_ms } }`
+    /// tunes them (see [`AppSwitcherParams`](crate::binding::AppSwitcherParams)).
+    /// Fired one-shot, where no release can follow (an Actions Ring slot, a
+    /// swipe), it is a balanced tap of the switcher chord. Appended — variant
+    /// order is wire format.
+    AppSwitcher,
 }
 
 /// Which of a held chord's keys stay down for the lifetime of the press.
@@ -335,6 +347,7 @@ macro_rules! for_each_unit_action {
             ShowActionsRing "Actions Ring" "action_ring.actions_ring" System Grid,
             PreviousKeypadPage "Previous Keypad Page" "actions.previous_keypad_page" System PreviousTab,
             NextKeypadPage "Next Keypad Page" "actions.next_keypad_page" System NextTab,
+            AppSwitcher "App Switcher" "actions.app_switcher" Navigation Applications,
             // Media
             PlayPause "Play / Pause" "actions.play_pause" Media Play,
             NextTrack "Next Track" "actions.next_track" Media NextTrack,

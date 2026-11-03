@@ -42,6 +42,9 @@ pub(super) struct ArmedControls {
     /// Raw-XY-capable additional CIDs diverted as gesture sources (side
     /// buttons on supported desktops and a gesture-mode DPI/ModeShift button).
     pub(super) gesture_button_cids: Vec<(u16, ButtonId)>,
+    /// The `spec.motion_buttons` members armed with raw XY, whose travel
+    /// streams instead of swiping.
+    pub(super) motion_buttons: Vec<ButtonId>,
     /// DPI/ModeShift CIDs diverted as plain buttons when gesture mode is off.
     pub(super) dpi_cids: Vec<u16>,
     /// Standard-button CIDs diverted per the session's [`CaptureSpec`], with
@@ -266,6 +269,10 @@ pub(super) async fn arm_controls_into(
             {
                 arm_reprog_control(&rc, cid, PointerDivert::RawXy, &mut armed.reporting).await?;
                 armed.gesture_button_cids.push((cid, button));
+                if spec.motion_buttons.contains(&button) && !armed.motion_buttons.contains(&button)
+                {
+                    armed.motion_buttons.push(button);
+                }
             }
         }
         for &cid in &reprog_controls::DPI_MODE_SHIFT_CIDS {
@@ -273,11 +280,19 @@ pub(super) async fn arm_controls_into(
                 .divert_gesture_buttons
                 .iter()
                 .any(|&(gesture_cid, button)| gesture_cid == cid && button == ButtonId::DpiToggle);
-            if gesture_requested {
-                // The raw-XY loop above owns a supported control. An
-                // unsupported one must stay native: plain-diverting it while
-                // dispatch still expects gesture events would swallow both
-                // the configured click and the firmware action.
+            let raw_armed = armed
+                .gesture_button_cids
+                .iter()
+                .any(|&(armed_cid, _)| armed_cid == cid);
+            // The raw-XY loop above owns a supported control. An unsupported
+            // one in gesture mode must stay native: plain-diverting it while
+            // dispatch still expects gesture events would swallow both the
+            // configured click and the firmware action. A motion-streaming
+            // button expects only its press and release, which a plain divert
+            // delivers, so it falls back to one and loses only the travel.
+            if raw_armed
+                || (gesture_requested && !spec.motion_buttons.contains(&ButtonId::DpiToggle))
+            {
                 continue;
             }
             if controls.iter().any(|c| c.cid == cid && c.is_divertable()) {

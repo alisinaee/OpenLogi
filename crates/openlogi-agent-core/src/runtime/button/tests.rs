@@ -14,6 +14,7 @@ fn hook_press(id: u64, button: ButtonId) -> ActivePress {
         token: PressToken::hook_for_test(id, button),
         behavior: PressBehavior::Immediate(Action::Copy),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn hook_press_bound(id: u64, binding: &Binding) -> ActivePress {
         token: PressToken::hook_for_test(id, ButtonId::Back),
         behavior: PressBehavior::new(Some(binding), Instant::now()),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     }
 }
 
@@ -214,6 +216,7 @@ fn cancellation_is_scoped_to_one_session() {
         },
         behavior: PressBehavior::LifecycleOnly,
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     let second = ActivePress {
         token: PressToken {
@@ -223,6 +226,7 @@ fn cancellation_is_scoped_to_one_session() {
         },
         behavior: PressBehavior::LifecycleOnly,
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     state.press(first.clone());
     state.press(second.clone());
@@ -246,6 +250,7 @@ fn hook_cancellation_leaves_hidpp_presses_active() {
         },
         behavior: PressBehavior::LifecycleOnly,
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     state.press(hook.clone());
     state.press(hidpp.clone());
@@ -642,6 +647,7 @@ fn release_before_long_press_threshold_fires_only_the_short_action() {
         token: PressToken::hook_for_test(1, ButtonId::Back),
         behavior: PressBehavior::new(Some(&binding), pressed_at),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     state.press(press.clone());
     let mut events = Vec::new();
@@ -681,6 +687,7 @@ fn threshold_fires_long_once_and_suppresses_short_on_release() {
         token: PressToken::hook_for_test(1, ButtonId::Back),
         behavior: PressBehavior::new(Some(&binding), pressed_at),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     state.press(press.clone());
     let mut events = Vec::new();
@@ -730,6 +737,7 @@ fn cancellation_never_fires_a_pending_short_or_long_action() {
         token: PressToken::hook_for_test(1, ButtonId::Back),
         behavior: PressBehavior::new(Some(&binding), pressed_at),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     state.press(press);
     let mut events = Vec::new();
@@ -841,6 +849,7 @@ fn the_worker_waits_only_for_the_earliest_pending_long_press_threshold() {
         token: PressToken::hook_for_test(id, button),
         behavior: PressBehavior::new(Some(&binding), at),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     let mut state = ButtonState::default();
     assert_eq!(state.next_deadline(), None, "an idle worker has no timer");
@@ -1013,6 +1022,7 @@ fn overdue_long_press_precedes_unrelated_queued_actions() {
         token: PressToken::hook_for_test(1, ButtonId::Back),
         behavior: PressBehavior::new(Some(&binding), pressed_at),
         target: ActionDispatchTarget::Keyboard,
+        app_switcher: None,
     };
     state.press(press.clone());
     commands
@@ -1075,6 +1085,7 @@ fn continuous_commands_cannot_starve_a_long_press_deadline() {
                 token: PressToken::hook_for_test(1, ButtonId::Back),
                 behavior: PressBehavior::new(Some(&binding), pressed_at),
                 target: ActionDispatchTarget::Keyboard,
+                app_switcher: None,
             }),
         })
         .expect("test queue should accept the press");
@@ -1368,4 +1379,76 @@ fn a_long_press_arms_its_own_hold_time_instead_of_the_default() {
         behavior.fire_long(pressed_at + Duration::from_millis(1000)),
         Some(Action::Paste)
     );
+}
+
+fn switcher_binding(hold_ms: Option<u16>) -> Binding {
+    use openlogi_core::binding::{AppSwitcherBinding, AppSwitcherParams, HoldThreshold};
+    Binding::AppSwitcher(AppSwitcherBinding::new(AppSwitcherParams::new(
+        None,
+        hold_ms.map(|ms| HoldThreshold::try_from(ms).expect("in range")),
+    )))
+}
+
+fn tap_chord() -> Action {
+    Action::CustomShortcut(
+        openlogi_core::binding::switcher_chord(openlogi_core::binding::SwitchDirection::Forward)
+            .clone(),
+    )
+}
+
+#[test]
+fn an_app_switcher_released_before_its_hold_time_taps_the_chord() {
+    for binding in [switcher_binding(None), Binding::Single(Action::AppSwitcher)] {
+        let events = events_after_press(&binding, |press| vec![up(press)]);
+        assert_eq!(triggered(&events), [&tap_chord()]);
+    }
+}
+
+#[test]
+fn an_app_switcher_past_its_hold_time_opens_instead_of_tapping() {
+    let binding = switcher_binding(Some(200));
+    let mut state = ButtonState::default();
+    let press = hook_press_bound(1, &binding);
+    let deadline = press.behavior.deadline().expect("a timed press");
+    assert_eq!(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            / 50,
+        3,
+        "the binding's 200 ms hold time arms the deadline"
+    );
+    state.press(press.clone());
+    let mut events = Vec::new();
+    emit_selected_long_presses(
+        &mut state,
+        std::slice::from_ref(&press.token),
+        deadline,
+        &mut |event| {
+            events.push(event);
+        },
+    );
+    process_input(&mut state, up(&press), &mut |event| events.push(event));
+    assert_eq!(triggered(&events), [&Action::AppSwitcher]);
+}
+
+#[test]
+fn motion_reaches_only_live_presses() {
+    let binding = switcher_binding(None);
+    let mut state = ButtonState::default();
+    let press = hook_press_bound(1, &binding);
+    state.press(press.clone());
+    let motion = |token: &PressToken| ButtonInput::MotionWhilePressed {
+        token: token.clone(),
+        dx: 7,
+    };
+    let mut events = Vec::new();
+    process_input(&mut state, motion(&press.token), &mut |e| events.push(e));
+    process_input(&mut state, up(&press), &mut |e| events.push(e));
+    process_input(&mut state, motion(&press.token), &mut |e| events.push(e));
+    let motions = events
+        .iter()
+        .filter(|e| matches!(e, ButtonRuntimeEvent::Motion { dx: 7, .. }))
+        .count();
+    assert_eq!(motions, 1, "travel after release is dropped");
 }
