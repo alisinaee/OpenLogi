@@ -4,7 +4,9 @@ use openlogi_core::config::AppSettings;
 use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus, DeviceKind};
 use openlogi_ipc::{NoticeKind, OBSERVE_HOLD};
 
-use super::{LowBatteryWatch, NOTICE_LIFETIME, NoticeBoard};
+use openlogi_core::desktop_schema::{DesktopSchema, SpaceSchema};
+
+use super::{LowBatteryWatch, NOTICE_LIFETIME, NoticeBoard, SchemaCarry};
 
 fn reading(percentage: Option<u8>, level: BatteryLevel, status: BatteryStatus) -> BatteryInfo {
     BatteryInfo {
@@ -303,5 +305,26 @@ async fn a_newer_desktop_switch_replaces_the_older_and_keeps_battery_notices() {
             current: 2,
             schema: None,
         }
+    );
+}
+
+#[test]
+fn optimistic_desktop_reports_reuse_the_last_schema() {
+    let carry = SchemaCarry::default();
+    let map = |spaces| DesktopSchema {
+        apps: Vec::new(),
+        spaces: vec![SpaceSchema::default(); spaces],
+    };
+    assert_eq!(carry.carry(3, None), None, "nothing read yet stays plain");
+    assert_eq!(carry.carry(3, Some(map(3))), Some(map(3)));
+    assert_eq!(
+        carry.carry(3, None),
+        Some(map(3)),
+        "optimistic step reuses it"
+    );
+    assert_eq!(
+        carry.carry(4, None),
+        None,
+        "a map of another size is not reused"
     );
 }

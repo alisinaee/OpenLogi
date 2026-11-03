@@ -64,6 +64,30 @@ impl Default for NoticeBoard {
     }
 }
 
+/// The last desktop map a switch read. A roll posts an optimistic report per
+/// step with no map, and only the highlighted desktop changes between them, so
+/// each such report borrows the last map instead of flipping the switcher to
+/// plain boxes; a report with a map refreshes it.
+#[derive(Debug, Default)]
+pub struct SchemaCarry {
+    last: Mutex<Option<DesktopSchema>>,
+}
+
+impl SchemaCarry {
+    /// The map to post for a report of `count` desktops that read `schema`:
+    /// that map, else the last one when it still fits `count`, else none.
+    pub fn carry(&self, count: u16, schema: Option<DesktopSchema>) -> Option<DesktopSchema> {
+        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(schema) = schema {
+            *last = Some(schema.clone());
+            return Some(schema);
+        }
+        last.as_ref()
+            .filter(|last| last.spaces.len() == usize::from(count))
+            .cloned()
+    }
+}
+
 impl NoticeBoard {
     /// Show `kind` for [`NOTICE_LIFETIME`], in the UI locale `language`
     /// (`None` follows the overlay host's system locale).

@@ -151,9 +151,13 @@ fn mapped(switcher: &Switcher) -> bool {
 }
 
 /// What decides the window's size: two switchers with the same shape fit the
-/// same window, so the open one is updated in place.
+/// same window, so the open one is updated in place. Whether a report carries
+/// the schema is deliberately not part of it: a roll mixes mapped and plain
+/// reports, and the window must never be replaced mid-roll. A row that can be
+/// mapped always gets the mapped size; its plain boxes sit centred inside it.
 fn shape(switcher: &Switcher) -> (u16, bool) {
-    (boxes(switcher), mapped(switcher))
+    let boxes = boxes(switcher);
+    (boxes, boxes <= MAX_MAPPED_BOXES)
 }
 
 /// The width and height of one box.
@@ -629,11 +633,40 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_reports_with_and_without_schema_reuse_one_window() {
+        let with = Switcher {
+            schema: Some(Arc::new(schema())),
+            ..plain(4)
+        };
+        for count in 1..=MAX_MAPPED_BOXES + 3 {
+            let (plain_report, mapped_report) = (
+                Switcher {
+                    count,
+                    ..plain(count)
+                },
+                Switcher {
+                    count,
+                    ..with.clone()
+                },
+            );
+            assert_eq!(shape(&plain_report), shape(&mapped_report), "{count}");
+            assert_eq!(
+                window_size(shape(&plain_report)),
+                window_size(shape(&mapped_report))
+            );
+        }
+    }
+
+    #[test]
     fn mapped_boxes_size_the_window_and_too_many_stay_plain() {
         let mut mapped_switcher = plain(4);
         mapped_switcher.schema = Some(Arc::new(schema()));
         assert_eq!(shape(&mapped_switcher), (4, true));
-        assert_eq!(shape(&plain(4)), (4, false));
+        assert_eq!(
+            shape(&plain(4)),
+            (4, true),
+            "schema presence keeps the size"
+        );
         let wide = Switcher {
             count: MAX_MAPPED_BOXES + 1,
             ..mapped_switcher
