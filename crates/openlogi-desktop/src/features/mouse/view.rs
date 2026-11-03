@@ -507,13 +507,16 @@ impl MouseModelView {
         let switcher = AppState::try_read(cx)
             .zip(button)
             .and_then(|(state, button)| state.app_switchers().get(&button).copied());
-        let committed = switcher.map(app_switcher::hold_ms).unwrap_or_else(|| {
-            AppState::try_read(cx)
-                .zip(button)
-                .and_then(|(state, button)| state.long_presses().get(&button))
-                .and_then(|binding| u16::try_from(binding.threshold().as_millis()).ok())
-                .unwrap_or(LONG_PRESS_MS)
-        });
+        let committed = switcher.map_or_else(
+            || {
+                AppState::try_read(cx)
+                    .zip(button)
+                    .and_then(|(state, button)| state.long_presses().get(&button))
+                    .and_then(|binding| u16::try_from(binding.threshold().as_millis()).ok())
+                    .unwrap_or(LONG_PRESS_MS)
+            },
+            app_switcher::hold_ms,
+        );
         self.hold_slider.sync(committed, window, cx);
         self.app_switcher.sync(button, switcher, window, cx);
         let editable = switcher.is_none()
