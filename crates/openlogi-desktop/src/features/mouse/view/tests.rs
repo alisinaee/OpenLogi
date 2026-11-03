@@ -440,9 +440,13 @@ fn a_selected_gesture_can_render_in_the_binding_inspector(cx: &mut TestAppContex
                 press_force: None,
                 extra_actions: &[],
                 hidden_actions: &[],
+                long_presses: &BTreeMap::new(),
+                hold_editable: false,
+                hold_slider: None,
             },
             ActionPickerContext {
                 open: true,
+                slot: PickSlot::Tap,
                 search: &view.action_search,
                 shortcut_input: &view.custom_shortcut_input,
                 application_input: &view.custom_application_input,

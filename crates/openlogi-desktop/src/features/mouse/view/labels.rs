@@ -277,6 +277,7 @@ impl RenderOnce for LabelTrigger {
 pub(super) fn binding_label_for_control(
     control: MouseControlId,
     bindings: &std::collections::BTreeMap<ButtonId, Action>,
+    long_presses: &std::collections::BTreeMap<ButtonId, openlogi_core::binding::LongPressBinding>,
     gesture_buttons: &[ButtonId],
 ) -> BindingLabel {
     if control
@@ -295,8 +296,12 @@ pub(super) fn binding_label_for_control(
                 .get(&button)
                 .cloned()
                 .unwrap_or_else(|| default_binding(button));
+            let tap = localized_action_label(&action);
             BindingLabel {
-                text: localized_action_label(&action),
+                text: long_presses.get(&button).map_or_else(
+                    || tap.clone(),
+                    |long_press| super::super::inspector::tap_hold_label(&tap, long_press),
+                ),
                 icon: Some(action_icon_path(&action)),
             }
         }
