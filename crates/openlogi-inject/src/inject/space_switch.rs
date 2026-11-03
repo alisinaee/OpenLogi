@@ -122,6 +122,17 @@ pub(super) struct SpaceState {
 }
 
 impl SpaceState {
+    /// How many Spaces the display has and which one (counted from 1) is
+    /// current; `None` when the current Space is not listed or the list is
+    /// too long to count.
+    pub(super) fn position(&self) -> Option<(u16, u16)> {
+        let index = self.ordered.iter().position(|id| *id == self.current)?;
+        Some((
+            u16::try_from(self.ordered.len()).ok()?,
+            u16::try_from(index + 1).ok()?,
+        ))
+    }
+
     fn target(&self, direction: Direction) -> Result<Option<u64>, Failure> {
         if self.display.is_empty()
             || self.current == 0
@@ -381,6 +392,75 @@ impl Pending {
     /// Forget the backlog: the switch it followed did not land where planned.
     pub(super) fn clear(&mut self) {
         self.0 = 0;
+    }
+}
+
+/// How long after its last step a roll is still trusted to be where it
+/// planned. A wheel's steps come far closer than this; past it the Spaces are
+/// read afresh.
+pub(super) const ROLL_WINDOW: Duration = Duration::from_millis(500);
+
+/// What one step of a [`Roll`] decided.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Step {
+    /// Already at the first or last Space: post nothing.
+    Boundary,
+    /// Post the switch; the roll now plans to be on the neighbour.
+    Moved,
+}
+
+/// The plan of consecutive instant switches. Each step moves the planned
+/// Space by one, clamped at the first and last, without waiting for the
+/// previous switch to be confirmed: the confirmation is reconciled later by
+/// [`Roll::reconcile`] and never gates a post. Times are on one caller-owned
+/// monotonic clock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Roll {
+    display_id: u32,
+    state: SpaceState,
+    touched: Duration,
+}
+
+impl Roll {
+    pub(super) fn new(display_id: u32, state: SpaceState, now: Duration) -> Self {
+        Self {
+            display_id,
+            state,
+            touched: now,
+        }
+    }
+
+    /// Whether the plan still describes `display_id`'s Spaces at `now`.
+    pub(super) fn live(&self, display_id: u32, now: Duration) -> bool {
+        self.display_id == display_id && now.saturating_sub(self.touched) < ROLL_WINDOW
+    }
+
+    pub(super) fn step(&mut self, direction: Direction, now: Duration) -> Result<Step, Failure> {
+        let target = self.state.target(direction)?;
+        self.touched = now;
+        Ok(match target {
+            None => Step::Boundary,
+            Some(id) => {
+                self.state.current = id;
+                Step::Moved
+            }
+        })
+    }
+
+    /// The planned position: Space count and current Space from 1.
+    pub(super) fn position(&self) -> Option<(u16, u16)> {
+        self.state.position()
+    }
+
+    /// The Space the plan is on.
+    pub(super) fn planned(&self) -> u64 {
+        self.state.current
+    }
+
+    /// Replace the plan with what the system confirmed.
+    pub(super) fn reconcile(&mut self, confirmed: SpaceState, now: Duration) {
+        self.state = confirmed;
+        self.touched = now;
     }
 }
 

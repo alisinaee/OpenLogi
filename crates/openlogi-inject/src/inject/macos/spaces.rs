@@ -34,8 +34,8 @@ use objc2_foundation::{
 };
 
 use super::super::space_switch::{
-    self, Backend, Direction, Failure, Lease, Pace, Pending, PostGate, SlideFrame, SlidePhase,
-    SpaceState,
+    self, Backend, Direction, Failure, Lease, Pace, Pending, PostGate, Roll, SlideFrame,
+    SlidePhase, SpaceState, Step,
 };
 use super::super::{DesktopObserver, DesktopPosition, DesktopSwitch};
 use super::{app_services, app_services_symbol};
@@ -83,17 +83,7 @@ fn report(display: u32, state: &SpaceState) {
     let Some(observer) = observer else {
         return;
     };
-    let position = state
-        .ordered
-        .iter()
-        .position(|id| *id == state.current)
-        .and_then(|index| {
-            Some((
-                u16::try_from(state.ordered.len()).ok()?,
-                u16::try_from(index + 1).ok()?,
-            ))
-        });
-    let Some((count, current)) = position else {
+    let Some((count, current)) = state.position() else {
         return;
     };
     let ticket = REPORTS.fetch_add(1, Ordering::SeqCst) + 1;
@@ -110,6 +100,24 @@ fn report(display: u32, state: &SpaceState) {
         count,
         current,
         schema,
+    });
+}
+
+/// Tell the observer a position at once, without the desktops' windows. It
+/// supersedes any slower report still reading them.
+fn report_position(count: u16, current: u16) {
+    let observer = OBSERVER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let Some(observer) = observer else {
+        return;
+    };
+    REPORTS.fetch_add(1, Ordering::SeqCst);
+    observer(DesktopPosition {
+        count,
+        current,
+        schema: None,
     });
 }
 
@@ -136,6 +144,12 @@ fn pending() -> std::sync::MutexGuard<'static, Pending> {
 }
 
 fn start(direction: Direction) {
+    // An instant switch does not wait for the one before it to be confirmed,
+    // unless an animated one still holds the lease.
+    if desktop_switch() == DesktopSwitch::Instant && !BUSY.load(Ordering::Acquire) {
+        instant(direction);
+        return;
+    }
     // Decide under the backlog lock, so an ask that loses the lease is seen
     // by the worker that hands the lease on (or releases it) under the same lock.
     let lease = {
@@ -162,6 +176,8 @@ fn begin(direction: Direction, lease: Lease<'static>) {
     };
     // Read once: a setting changed mid-switch applies to the next one.
     let switch = desktop_switch();
+    // This switch is confirmed state by state; the instant plan is stale.
+    *roll() = None;
     let result = space_switch::spawn_ordered(move |gate| {
         let mut landed = false;
         let reported = autoreleasepool(|_| {
@@ -222,6 +238,197 @@ fn begin(direction: Direction, lease: Lease<'static>) {
     if let Err(error) = result {
         tracing::warn!(?error, "Space switch preparation failed — no retry");
     }
+}
+
+/// The plan of the instant roll under way; see [`Roll`].
+static ROLL: Mutex<Option<Roll>> = Mutex::new(None);
+/// Steps posted so far: a settle that finds a newer step has left its
+/// reconciliation to that step's own settle.
+static STEPS: AtomicU64 = AtomicU64::new(0);
+/// How long the roll must be quiet before it is confirmed and reported in
+/// full (schema included).
+const SETTLE_QUIET: Duration = Duration::from_millis(120);
+const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn roll() -> std::sync::MutexGuard<'static, Option<Roll>> {
+    ROLL.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A monotonic clock for [`Roll`], counted from its first use.
+fn now() -> Duration {
+    static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    START.elapsed()
+}
+
+/// Post one instant switch at once. The step is planned on [`Roll`] instead of
+/// waiting for the previous switch to land, so the steps of a wheel roll go
+/// out back-to-back; the caller waits for the post only. The switch is
+/// confirmed and reported in full later, by [`settle`].
+fn instant(direction: Direction) {
+    let Some(display_id) = cursor_display() else {
+        tracing::warn!(?direction, "Space switch: cursor display unavailable");
+        return;
+    };
+    let result = space_switch::spawn_ordered(move |gate| {
+        autoreleasepool(|_| instant_step(display_id, direction, gate));
+    });
+    if let Err(error) = result {
+        tracing::warn!(?error, "Space switch preparation failed — no retry");
+    }
+}
+
+fn instant_step(display_id: u32, direction: Direction, gate: PostGate) {
+    // Held through the post, so steps reach the Dock in the order they were
+    // planned.
+    let mut plan = roll();
+    let at = now();
+    if !plan.as_ref().is_some_and(|roll| roll.live(display_id, at)) {
+        *plan = None;
+        // Only the first step of a roll reads the Spaces.
+        let state =
+            Native::new(display_id, DesktopSwitch::Instant).and_then(|mut native| native.state());
+        match state {
+            Ok(state) => *plan = Some(Roll::new(display_id, state, at)),
+            Err(error) => {
+                tracing::warn!(
+                    display_id,
+                    ?direction,
+                    ?error,
+                    "Space switch unconfirmed — no retry"
+                );
+                return;
+            }
+        }
+    }
+    let Some(roll) = plan.as_mut() else {
+        return;
+    };
+    match roll.step(direction, at) {
+        Err(error) => {
+            tracing::warn!(
+                display_id,
+                ?direction,
+                ?error,
+                "Space switch unconfirmed — no retry"
+            );
+            *plan = None;
+            return;
+        }
+        Ok(Step::Boundary) => {
+            if let Some((count, current)) = roll.position() {
+                report_position(count, current);
+            }
+            tracing::debug!(display_id, ?direction, "Space switch at the edge");
+            return;
+        }
+        Ok(Step::Moved) => {}
+    }
+    let planned = roll.planned();
+    let position = roll.position();
+    if let Err(error) = post_output(display_id, DesktopSwitch::Instant, direction, gate) {
+        tracing::warn!(
+            display_id,
+            ?direction,
+            ?error,
+            "Space switch unconfirmed — no retry"
+        );
+        *plan = None;
+        return;
+    }
+    let stamp = STEPS.fetch_add(1, Ordering::SeqCst) + 1;
+    drop(plan);
+    if let Some((count, current)) = position {
+        report_position(count, current);
+    }
+    settler().send(Settle {
+        display_id,
+        planned,
+        stamp,
+    });
+}
+
+/// A posted instant step awaiting confirmation.
+struct Settle {
+    display_id: u32,
+    planned: u64,
+    stamp: u64,
+}
+
+/// The sender to the one thread confirming instant rolls.
+fn settler() -> &'static SettleSender {
+    static SETTLER: LazyLock<SettleSender> = LazyLock::new(|| {
+        let (send, receive) = mpsc::channel::<Settle>();
+        let spawned = std::thread::Builder::new()
+            .name("openlogi-spaces-settle".into())
+            .spawn(move || {
+                while let Ok(mut last) = receive.recv() {
+                    // Wait for the roll to go quiet; only its last step needs
+                    // confirming, and nothing here may slow a step down.
+                    while let Ok(next) = receive.recv_timeout(SETTLE_QUIET) {
+                        last = next;
+                    }
+                    autoreleasepool(|_| settle(&last));
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "Space switch confirmation unavailable");
+        }
+        SettleSender(Mutex::new(send))
+    });
+    &SETTLER
+}
+
+struct SettleSender(Mutex<mpsc::Sender<Settle>>);
+
+impl SettleSender {
+    fn send(&self, settle: Settle) {
+        let _ = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(settle);
+    }
+}
+
+/// Confirm where a roll landed, correct the plan and the switcher if it
+/// landed elsewhere, and report in full. Never delays a post.
+fn settle(step: &Settle) {
+    let Ok(mut native) = Native::new(step.display_id, DesktopSwitch::Instant) else {
+        *roll() = None;
+        return;
+    };
+    let confirmed = loop {
+        let Ok(state) = native.state() else {
+            *roll() = None;
+            return;
+        };
+        if state.current == step.planned {
+            break state;
+        }
+        let Some(remaining) = CONFIRMATION_TIMEOUT
+            .checked_sub(native.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+        else {
+            tracing::warn!(
+                display_id = step.display_id,
+                "Space switch unconfirmed — reconciling"
+            );
+            break state;
+        };
+        native.wait_for_change(remaining);
+    };
+    {
+        let mut plan = roll();
+        if STEPS.load(Ordering::SeqCst) != step.stamp {
+            // A later step is already under way; its settle reconciles.
+            return;
+        }
+        match plan.as_mut() {
+            Some(roll) => roll.reconcile(confirmed.clone(), now()),
+            None => *plan = Some(Roll::new(step.display_id, confirmed.clone(), now())),
+        }
+    }
+    report(step.display_id, &confirmed);
 }
 
 fn cursor_display() -> Option<u32> {
@@ -377,11 +584,7 @@ impl Backend for Native {
     }
 
     fn post(&mut self, direction: Direction, gate: PostGate) -> Result<(), Failure> {
-        let output = Output::prepare(self.switch, direction).ok_or(Failure::PostFailed)?;
-        if cursor_display() != Some(self.display) {
-            return Err(Failure::ContextChanged);
-        }
-        gate.commit(|| output.post())
+        post_output(self.display, self.switch, direction, gate)
     }
 
     fn elapsed(&self) -> Duration {
@@ -392,6 +595,21 @@ impl Backend for Native {
         // Deadline wakeup is cleanup/reconciliation, never evidence of success.
         let _ = self.changed.recv_timeout(remaining);
     }
+}
+
+/// Build one switch's events, check the cursor is still on `display`, and
+/// post them through `gate`.
+fn post_output(
+    display: u32,
+    switch: DesktopSwitch,
+    direction: Direction,
+    gate: PostGate,
+) -> Result<(), Failure> {
+    let output = Output::prepare(switch, direction).ok_or(Failure::PostFailed)?;
+    if cursor_display() != Some(display) {
+        return Err(Failure::ContextChanged);
+    }
+    gate.commit(|| output.post())
 }
 
 /// Every event of one switch. All of them are built before the first is

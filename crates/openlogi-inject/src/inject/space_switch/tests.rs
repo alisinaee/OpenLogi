@@ -491,3 +491,53 @@ fn pending_asks_replay_one_step_at_a_time_and_cancel_when_opposite() {
     pending.clear();
     assert_eq!(pending.take(), None);
 }
+
+#[test]
+fn a_roll_steps_without_confirmation_and_clamps_at_the_edges() {
+    let t = Duration::ZERO;
+    let mut roll = Roll::new(1, state(91), t);
+    // 91 -> 7 -> 42 are posted back-to-back: no state read sits between them.
+    assert_eq!(roll.step(Direction::Next, t), Ok(Step::Moved));
+    assert_eq!(roll.position(), Some((3, 2)));
+    assert_eq!(roll.step(Direction::Next, t), Ok(Step::Moved));
+    assert_eq!(roll.position(), Some((3, 3)));
+    // The last desktop: more asks post nothing and the index stays.
+    for _ in 0..5 {
+        assert_eq!(roll.step(Direction::Next, t), Ok(Step::Boundary));
+        assert_eq!(roll.position(), Some((3, 3)));
+    }
+    assert_eq!(roll.step(Direction::Previous, t), Ok(Step::Moved));
+    assert_eq!(roll.step(Direction::Previous, t), Ok(Step::Moved));
+    assert_eq!(roll.step(Direction::Previous, t), Ok(Step::Boundary));
+    assert_eq!(roll.position(), Some((3, 1)));
+}
+
+#[test]
+fn a_roll_goes_stale_and_reconciles_with_the_confirmed_state() {
+    let mut roll = Roll::new(1, state(91), Duration::ZERO);
+    assert!(roll.live(1, ROLL_WINDOW.saturating_sub(Duration::from_millis(1))));
+    assert!(!roll.live(2, Duration::ZERO), "another display");
+    assert!(!roll.live(1, ROLL_WINDOW), "too long since the last step");
+    assert_eq!(
+        roll.step(Direction::Next, ROLL_WINDOW),
+        Ok(Step::Moved),
+        "a step renews the window"
+    );
+    assert!(roll.live(
+        1,
+        (ROLL_WINDOW * 2).saturating_sub(Duration::from_millis(1))
+    ));
+    // The system landed elsewhere than planned: the confirmed state wins.
+    roll.reconcile(state(42), ROLL_WINDOW);
+    assert_eq!(roll.planned(), 42);
+    assert_eq!(roll.position(), Some((3, 3)));
+}
+
+#[test]
+fn an_invalid_snapshot_fails_a_roll_step() {
+    let mut roll = Roll::new(1, state(5), Duration::ZERO);
+    assert_eq!(
+        roll.step(Direction::Next, Duration::ZERO),
+        Err(Failure::Unavailable)
+    );
+}
