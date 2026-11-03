@@ -321,6 +321,13 @@ pub struct AppSettings {
     /// Only macOS reads it.
     #[serde(default = "default_true")]
     pub show_desktop_switcher: bool,
+    /// Whether each box of the desktop switcher also maps its desktop: its
+    /// windows as outlines tinted per app, and the icons of the apps with the
+    /// most room. **On by default.** Needs [`Self::show_desktop_switcher`];
+    /// reads window frames only, never titles. Only macOS reads it. There is
+    /// no toggle for it in the GUI yet.
+    #[serde(default = "default_true")]
+    pub desktop_switcher_show_apps: bool,
 }
 
 const SENSITIVITY_MIN: u8 = 1;
@@ -529,6 +536,7 @@ impl Default for AppSettings {
             lock_key_notifications: true,
             animate_desktop_switch: true,
             show_desktop_switcher: true,
+            desktop_switcher_show_apps: true,
         }
     }
 }

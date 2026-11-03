@@ -27,6 +27,9 @@ animate_desktop_switch = true
 # macOS only: a numbered box per desktop flashes after Previous / Next Desktop
 # (default true).
 show_desktop_switcher = true
+# macOS only: each box also maps its desktop - window outlines tinted per app
+# and the biggest apps' icons (default true). Frames only, no window titles.
+desktop_switcher_show_apps = true
 
 # Momentum scrolling for every mouse whose smooth_wheel is on. A device's own
 # momentum_scrolling table overrides it.

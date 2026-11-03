@@ -21,6 +21,7 @@ pub mod bindings;
 pub mod brand;
 pub mod color;
 pub mod config;
+pub mod desktop_schema;
 pub mod device;
 pub mod device_order;
 pub mod diagnostics;

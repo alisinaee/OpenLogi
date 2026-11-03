@@ -386,13 +386,17 @@ pub fn set_desktop_switch(switch: DesktopSwitch) {
 
 /// Where a confirmed Previous or Next Desktop switch left the pointer's
 /// display: its desktops in Mission Control order, the current one among them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DesktopPosition {
     /// How many desktops the display has, full-screen Spaces included, as
     /// Mission Control lists them.
     pub count: u16,
     /// The current desktop, counted from 1.
     pub current: u16,
+    /// What each desktop holds, when [`set_desktop_schema`] asked for it and
+    /// the windows could be read in time. Frames and owners only, never
+    /// window titles.
+    pub schema: Option<openlogi_core::desktop_schema::DesktopSchema>,
 }
 
 /// Where a switch reports its [`DesktopPosition`]. Called from the thread
@@ -411,6 +415,24 @@ pub fn set_desktop_observer(observer: Option<DesktopObserver>) {
         }
         _ => {
             let _ = observer;
+        }
+    }
+}
+
+/// Whether a [`DesktopPosition`] also carries the [`DesktopSchema`] of the
+/// display's desktops. Reading it takes a few milliseconds after the switch is
+/// confirmed and never delays the switch itself; if it overruns its budget the
+/// position reports without it. Only macOS reads windows; elsewhere this does
+/// nothing.
+///
+/// [`DesktopSchema`]: openlogi_core::desktop_schema::DesktopSchema
+pub fn set_desktop_schema(enabled: bool) {
+    cfg_select! {
+        target_os = "macos" => {
+            macos::set_desktop_schema(enabled);
+        }
+        _ => {
+            let _ = enabled;
         }
     }
 }

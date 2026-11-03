@@ -12,7 +12,7 @@
 
 use std::ffi::{c_int, c_void};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
@@ -55,9 +55,26 @@ pub(in crate::inject) fn set_desktop_observer(observer: Option<DesktopObserver>)
     *OBSERVER.lock().unwrap_or_else(PoisonError::into_inner) = observer;
 }
 
-/// Tell the observer, if any, where `state` leaves the display. A Space list
+/// Whether a report also maps the desktops; see [`set_desktop_schema`].
+static SCHEMA: AtomicBool = AtomicBool::new(false);
+/// Reports begun so far: a report that finds a newer one begun is stale and
+/// stays silent, so a slow read can never overwrite the position a later
+/// switch reported.
+static REPORTS: AtomicU64 = AtomicU64::new(0);
+
+pub(in crate::inject) fn set_desktop_schema(enabled: bool) {
+    SCHEMA.store(enabled, Ordering::Relaxed);
+}
+
+/// How long a report may spend reading the desktops' windows. Past it the
+/// position reports plain, as it does for any failure.
+const SCHEMA_BUDGET: Duration = Duration::from_millis(180);
+
+/// Tell the observer, if any, where `state` leaves `display`. A Space list
 /// that does not hold the current Space, or is too long to count, says nothing.
-fn report(state: &SpaceState) {
+/// Runs after the switch is confirmed and its single-flight lease released, so
+/// the schema read never holds up the next switch.
+fn report(display: u32, state: &SpaceState) {
     let observer = OBSERVER
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -70,14 +87,29 @@ fn report(state: &SpaceState) {
         .iter()
         .position(|id| *id == state.current)
         .and_then(|index| {
-            Some(DesktopPosition {
-                count: u16::try_from(state.ordered.len()).ok()?,
-                current: u16::try_from(index + 1).ok()?,
-            })
+            Some((
+                u16::try_from(state.ordered.len()).ok()?,
+                u16::try_from(index + 1).ok()?,
+            ))
         });
-    if let Some(position) = position {
-        observer(position);
+    let Some((count, current)) = position else {
+        return;
+    };
+    let ticket = REPORTS.fetch_add(1, Ordering::SeqCst) + 1;
+    let schema = if SCHEMA.load(Ordering::Relaxed) {
+        schema::gather(display, state, SCHEMA_BUDGET)
+    } else {
+        None
+    };
+    if REPORTS.load(Ordering::SeqCst) != ticket {
+        tracing::debug!("desktop report superseded by a newer switch");
+        return;
     }
+    observer(DesktopPosition {
+        count,
+        current,
+        schema,
+    });
 }
 
 fn desktop_switch() -> DesktopSwitch {
@@ -109,8 +141,7 @@ fn start(direction: Direction) {
     // Read once: a setting changed mid-switch applies to the next one.
     let switch = desktop_switch();
     let result = space_switch::spawn_ordered(move |gate| {
-        let _lease = lease;
-        autoreleasepool(|_| {
+        let reported = autoreleasepool(|_| {
             let result = Native::new(display_id, switch).and_then(|mut native| {
                 let outcome = space_switch::run(&mut native, direction, gate)?;
                 // The position the switch ended on. A failed read only
@@ -126,18 +157,25 @@ fn start(direction: Direction) {
                         ?outcome,
                         "Space switch result"
                     );
-                    if let Some(state) = state {
-                        report(&state);
-                    }
+                    state
                 }
-                Err(error) => tracing::warn!(
-                    display_id,
-                    ?direction,
-                    ?error,
-                    "Space switch unconfirmed — no retry"
-                ),
+                Err(error) => {
+                    tracing::warn!(
+                        display_id,
+                        ?direction,
+                        ?error,
+                        "Space switch unconfirmed — no retry"
+                    );
+                    None
+                }
             }
         });
+        // The switch is done: free the single-flight lease before reading
+        // windows for the switcher, so a quick next press is never skipped.
+        drop(lease);
+        if let Some(state) = reported {
+            autoreleasepool(|_| report(display_id, &state));
+        }
     });
     if let Err(error) = result {
         tracing::warn!(?error, "Space switch preparation failed — no retry");
@@ -726,24 +764,28 @@ impl Api {
                 return None;
             }
             let spaces = array(get(&display, "Spaces")?)?;
-            let ordered = spaces
+            let kinds = spaces
                 .into_iter()
                 .map(|space| {
                     let space = dictionary(space)?;
                     // Unknown/system-only Space kinds must not be skipped: skipping
                     // would turn an adjacent gesture into a wrong-target request.
-                    if !matches!(number(&space, "type")?, 0 | 4) {
-                        return None;
-                    }
-                    number(&space, "id64")
+                    let kind = number(&space, "type").filter(|kind| matches!(kind, 0 | 4))?;
+                    Some((number(&space, "id64")?, kind == 4))
                 })
                 .collect::<Option<Vec<_>>>()?;
+            let ordered = kinds.iter().map(|&(id, _)| id).collect();
+            let fullscreen = kinds
+                .iter()
+                .filter_map(|&(id, fullscreen)| fullscreen.then_some(id))
+                .collect();
             // SAFETY: identifier is a live CFString returned for this connection.
             let current = unsafe { (self.current)(connection, &raw const *identifier) };
             selected = Some(SpaceState {
                 display: name,
                 current,
                 ordered,
+                fullscreen,
             });
         }
         if selected.is_none() {
@@ -777,6 +819,8 @@ fn get(info: &Dictionary, key: &'static str) -> Option<CFRetained<CFType>> {
 fn number(info: &Dictionary, key: &'static str) -> Option<u64> {
     u64::try_from(get(info, key)?.downcast::<CFNumber>().ok()?.as_i64()?).ok()
 }
+
+mod schema;
 
 #[cfg(test)]
 mod tests;

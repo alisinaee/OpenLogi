@@ -9,6 +9,7 @@ fn state(current: u64) -> SpaceState {
         display: "second-display".into(),
         current,
         ordered: vec![91, 7, 42],
+        fullscreen: vec![42],
     }
 }
 

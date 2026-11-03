@@ -202,7 +202,7 @@ pub(crate) fn notice_text(kind: &NoticeKind) -> NoticeText {
         }
         // Drawn by `desktop_switch`, never as a card; the position is the
         // only text it has.
-        NoticeKind::DesktopSwitch { count, current } => NoticeText {
+        NoticeKind::DesktopSwitch { count, current, .. } => NoticeText {
             title: format!("{current} / {count}").into(),
             detail: SharedString::default(),
         },
