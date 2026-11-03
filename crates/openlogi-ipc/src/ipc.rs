@@ -181,6 +181,8 @@ pub use succession::Identity;
 ///      `NoticeKind::DesktopSwitch` appended — the overlay's desktop switcher
 ///      after Previous Desktop or Next Desktop on macOS, with its
 ///      `DesktopSchema` — the apps and window frames of each desktop.
+///      `Action::AppSwitcher` and `Binding::AppSwitcher` appended — the app
+///      switcher button.
 pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the

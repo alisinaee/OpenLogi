@@ -142,7 +142,10 @@ pub fn hidpp_gesture_maps_for(
             binding.fill_gesture_defaults();
             match binding {
                 Binding::Gesture(map) => Some((button, map)),
-                Binding::Single(_) | Binding::LongPress(_) | Binding::WheelHold(_) => None,
+                Binding::Single(_)
+                | Binding::LongPress(_)
+                | Binding::WheelHold(_)
+                | Binding::AppSwitcher(_) => None,
             }
         })
         .collect()
@@ -187,7 +190,10 @@ pub fn oshook_gestures_for(
         .filter(|(id, _)| id.is_os_hook_button())
         .filter_map(|(id, binding)| match binding {
             Binding::Gesture(map) => Some((id, map)),
-            Binding::Single(_) | Binding::LongPress(_) | Binding::WheelHold(_) => None,
+            Binding::Single(_)
+            | Binding::LongPress(_)
+            | Binding::WheelHold(_)
+            | Binding::AppSwitcher(_) => None,
         })
         .collect()
 }

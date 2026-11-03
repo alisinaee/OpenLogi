@@ -11,6 +11,7 @@
 
 mod action;
 mod action_ring;
+mod app_switcher;
 mod application_target;
 mod button;
 mod category;
@@ -30,6 +31,10 @@ pub use action::{Action, HeldKeys, WorkflowStep};
 pub use action_ring::{
     ActionRingConfig, ActionRingEntry, ActionRingIcon, ActionRingLayout, ActionRingSlot,
     RingAction, RingActionError,
+};
+pub use app_switcher::{
+    APP_SWITCHER_HOLD_LIMIT, AppSwitcherBinding, AppSwitcherParams, StepPx, SwitchDirection,
+    SwitchRun, SwitchStepper, switcher_chord,
 };
 pub use application_target::{ApplicationTarget, ApplicationTargetError};
 pub use button::{ButtonId, GridKey, GridSlot, KeypadPage, ParseButtonIdError};

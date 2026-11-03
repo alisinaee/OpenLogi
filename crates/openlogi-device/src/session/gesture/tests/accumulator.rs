@@ -718,6 +718,64 @@ fn a_dpi_gesture_button_uses_the_shared_raw_xy_path() {
 }
 
 #[test]
+fn a_streaming_button_reports_travel_instead_of_swiping() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut acc = CaptureAccum::streaming(vec![ButtonId::DpiToggle]);
+    let cid = reprog_controls::DPI_MODE_SHIFT_CIDS[0];
+    let buttons = [(cid, ButtonId::DpiToggle)];
+    let down = RawControlEvent::DivertedButtons([cid, 0, 0, 0]);
+
+    acc.on_event(down, &[], &[], &buttons, &[], &tx);
+    // The hold's first sample is travel from before the press: dropped.
+    stale_report(&mut acc, &tx);
+    acc.backdate_hold_for_test();
+    for (dx, dy) in [(40, 900), (-25, 0), (0, 300)] {
+        acc.on_event(
+            RawControlEvent::RawXy { dx, dy },
+            &[],
+            &[],
+            &buttons,
+            &[],
+            &tx,
+        );
+    }
+    acc.on_event(release(), &[], &[], &buttons, &[], &tx);
+
+    let seen: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert_eq!(
+        seen,
+        [
+            CapturedInput::ButtonDown(ButtonId::DpiToggle),
+            CapturedInput::HeldMotion {
+                button: ButtonId::DpiToggle,
+                dx: 40
+            },
+            CapturedInput::HeldMotion {
+                button: ButtonId::DpiToggle,
+                dx: -25
+            },
+            CapturedInput::ButtonUp(ButtonId::DpiToggle),
+        ],
+        "no swipe, no click gesture, and purely vertical travel is dropped"
+    );
+}
+
+#[test]
+fn travel_outside_a_hold_is_not_streamed() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut acc = CaptureAccum::streaming(vec![ButtonId::DpiToggle]);
+    acc.on_event(
+        RawControlEvent::RawXy { dx: 90, dy: 0 },
+        &[],
+        &[],
+        &[],
+        &[],
+        &tx,
+    );
+    assert_eq!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+}
+
+#[test]
 fn a_held_dpi_button_presses_once_on_the_rising_edge() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut acc = CaptureAccum::default();

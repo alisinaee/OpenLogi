@@ -5,6 +5,7 @@
 //! without owning worker shutdown. Source-specific hook interpretation lives
 //! in [`hook`]; the button state machine remains an internal implementation.
 
+mod app_switcher;
 mod button;
 pub mod hook;
 mod pointer;
@@ -18,8 +19,9 @@ use std::time::{Duration, Instant};
 use openlogi_core::binding::{Action, Binding, ButtonId};
 use tracing::{debug, info, warn};
 
+use self::app_switcher::HeldAppSwitchers;
 use self::button::{
-    ButtonInputHandle, ButtonRuntimeEvent, ButtonRuntimeOwner, EndReason, PressControl,
+    ActivePress, ButtonInputHandle, ButtonRuntimeEvent, ButtonRuntimeOwner, EndReason, PressControl,
 };
 pub(crate) use self::button::{HidppSessionId, PressToken};
 pub(crate) use self::pointer::{FocusBinding, PointerPress, PointerSelection};
@@ -614,6 +616,7 @@ struct ButtonEventHandler {
     executor: ActionExecutor,
     held: HeldShortcuts,
     held_dpi: HeldDpiShifts,
+    switchers: HeldAppSwitchers,
 }
 
 impl ButtonEventHandler {
@@ -622,6 +625,7 @@ impl ButtonEventHandler {
             executor,
             held: HeldShortcuts::default(),
             held_dpi: HeldDpiShifts::default(),
+            switchers: HeldAppSwitchers::default(),
         }
     }
 
@@ -632,18 +636,22 @@ impl ButtonEventHandler {
                     if press.captured_by_os_hook() {
                         log_bound_action(press.control(), action);
                     }
-                    self.start_action(press.token(), action, press.device_key(), press.target());
+                    self.start_action(&press, action);
                 }
             }
             ButtonRuntimeEvent::Triggered { press, action } => {
                 if press.captured_by_os_hook() {
                     log_bound_action(press.control(), &action);
                 }
-                self.start_action(press.token(), &action, press.device_key(), press.target());
+                self.start_action(&press, &action);
+            }
+            ButtonRuntimeEvent::Motion { press, dx } => {
+                self.switchers.motion(press.token(), dx);
             }
             ButtonRuntimeEvent::Ended { press, reason } => {
                 self.held.end(press.token());
                 self.held_dpi.end(&self.executor, press.token());
+                self.switchers.end(press.token());
                 if let EndReason::Canceled(reason) = reason {
                     match press.control() {
                         PressControl::Button(button) => {
@@ -658,22 +666,29 @@ impl ButtonEventHandler {
         }
     }
 
-    fn start_action(
-        &mut self,
-        press: &PressToken,
-        action: &Action,
-        device_key: Option<&str>,
-        target: ActionDispatchTarget,
-    ) {
-        if action.held_chord().is_some() && target.resolve(action).is_none() {
+    fn start_action(&mut self, press: &ActivePress, action: &Action) {
+        let target = press.target();
+        let outputs_held = action.held_chord().is_some() || *action == Action::AppSwitcher;
+        if outputs_held && target.resolve(action).is_none() {
             return;
         }
         if matches!(action, Action::DpiShift) {
-            self.held_dpi.start(&self.executor, press, device_key);
+            self.held_dpi
+                .start(&self.executor, press.token(), press.device_key());
             return;
         }
-        if !self.held.start(press, action) {
-            self.executor.dispatch_to(action, device_key, target);
+        // The switcher's modifier belongs to the press that opened it. A
+        // one-shot source never reaches here with a press that carries the
+        // binding's tunables, so it keeps the plain balanced chord tap.
+        if *action == Action::AppSwitcher
+            && let Some(params) = press.app_switcher()
+        {
+            self.switchers.start(press.token(), params);
+            return;
+        }
+        if !self.held.start(press.token(), action) {
+            self.executor
+                .dispatch_to(action, press.device_key(), target);
         }
     }
 }
@@ -795,6 +810,12 @@ impl ActionDispatcher {
     /// Execute a semantic gesture action only if its exact press is still live.
     pub(crate) fn try_dispatch_while_pressed(&self, press: &PressToken, action: &Action) -> bool {
         self.buttons.try_trigger_while_pressed(press, action)
+    }
+
+    /// Report `dx` counts of sideways mouse travel while `press` is down,
+    /// which steps an open app switcher. Lossy by design.
+    pub(crate) fn try_motion_while_pressed(&self, press: &PressToken, dx: i16) -> bool {
+        self.buttons.try_motion_while_pressed(press, dx)
     }
 
     /// Record that the wheel moved while `press` was down, so a wheel-hold

@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::action::Action;
+use super::app_switcher::{AppSwitcherBinding, AppSwitcherParams};
 use super::defaults::default_gesture_binding;
 use super::gesture::GestureDirection;
 
@@ -20,7 +21,7 @@ pub const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
 /// cannot be mistaken for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "u16", into = "u16")]
-pub struct HoldThreshold(u16);
+pub struct HoldThreshold(pub(super) u16);
 
 impl HoldThreshold {
     /// Shortest accepted hold, in milliseconds.
@@ -224,7 +225,8 @@ impl WheelHoldBinding {
 /// table keyed by [`GestureDirection`] names (`Up`/`Down`/`Left`/`Right`/
 /// `Click`), [`LongPress`](Binding::LongPress) as the structurally distinct
 /// `{ short = ..., long = ... }` table, and [`WheelHold`](Binding::WheelHold)
-/// as `{ click = ..., wheel = "HorizontalScroll" }`.
+/// as `{ click = ..., wheel = "HorizontalScroll" }`, and
+/// [`AppSwitcher`](Binding::AppSwitcher) as `{ AppSwitcher = { .. } }`.
 ///
 /// The arms are disambiguated structurally: action variant names and gesture
 /// direction names have zero overlap, while a long press requires both
@@ -245,6 +247,10 @@ pub enum Binding {
     /// The main wheel scrolls horizontally while the button is held; a click
     /// without wheel movement runs the click action.
     WheelHold(WheelHoldBinding),
+    /// The app switcher button with its own tunables, serialized as
+    /// `{ AppSwitcher = { step = 60, hold_ms = 250 } }`. The same button with
+    /// the defaults is the plain `Single(Action::AppSwitcher)`.
+    AppSwitcher(AppSwitcherBinding),
 }
 
 impl Binding {
@@ -266,6 +272,21 @@ impl Binding {
                 .unwrap_or(Action::None),
             Binding::LongPress(binding) => binding.short().clone(),
             Binding::WheelHold(binding) => binding.click().clone(),
+            Binding::AppSwitcher(_) => Action::AppSwitcher,
+        }
+    }
+
+    /// The app switcher tunables this binding runs with, or `None` when it
+    /// is not an app switcher: the plain action runs with the defaults.
+    #[must_use]
+    pub fn app_switcher(&self) -> Option<AppSwitcherParams> {
+        match self {
+            Binding::Single(Action::AppSwitcher) => Some(AppSwitcherParams::default()),
+            Binding::AppSwitcher(binding) => Some(binding.params()),
+            Binding::Single(_)
+            | Binding::Gesture(_)
+            | Binding::LongPress(_)
+            | Binding::WheelHold(_) => None,
         }
     }
 
@@ -293,7 +314,10 @@ impl Binding {
     #[must_use]
     pub fn direction_action(&self, direction: GestureDirection) -> Option<&Action> {
         match self {
-            Binding::Single(_) | Binding::LongPress(_) | Binding::WheelHold(_) => None,
+            Binding::Single(_)
+            | Binding::LongPress(_)
+            | Binding::WheelHold(_)
+            | Binding::AppSwitcher(_) => None,
             Binding::Gesture(map) => map.get(&direction),
         }
     }
@@ -331,6 +355,7 @@ impl Binding {
             Binding::Single(action) => action.clone(),
             Binding::LongPress(binding) => binding.short().clone(),
             Binding::WheelHold(binding) => binding.click().clone(),
+            Binding::AppSwitcher(_) => Action::AppSwitcher,
             Binding::Gesture(_) => return,
         };
         *self = Binding::Gesture(BTreeMap::from([(GestureDirection::Click, click)]));

@@ -307,6 +307,18 @@ pub struct PlanDevice<'a> {
     pub layout: Option<&'a GamingLayout>,
 }
 
+/// Buttons that follow the mouse while held — the app switcher on the DPI
+/// button, which reports travel only as raw XY. They are diverted like
+/// gesture sources whose travel streams instead of swiping.
+fn motion_streaming_buttons(bindings: &BTreeMap<ButtonId, Binding>) -> Vec<ButtonId> {
+    bindings
+        .get(&ButtonId::DpiToggle)
+        .is_some_and(|binding| binding.app_switcher().is_some())
+        .then_some(ButtonId::DpiToggle)
+        .into_iter()
+        .collect()
+}
+
 /// Build one device's plan from the config (per-app effective for `app`).
 #[must_use]
 pub fn plan_for_device(
@@ -339,7 +351,8 @@ pub fn plan_for_device(
                 .filter(|(_, button)| side_gesture_bindings.contains_key(button)),
         );
     }
-    if gesture_bindings.contains_key(&ButtonId::DpiToggle) {
+    let motion_buttons = motion_streaming_buttons(&bindings);
+    if gesture_bindings.contains_key(&ButtonId::DpiToggle) || !motion_buttons.is_empty() {
         divert_gesture_buttons.extend(
             DPI_MODE_SHIFT_CIDS
                 .into_iter()
@@ -422,6 +435,7 @@ pub fn plan_for_device(
                     .map(|(cid, _)| cid)
                     .collect(),
                 divert_gesture_buttons,
+                motion_buttons,
                 divert_buttons,
                 divert_wheel_buttons,
                 // Needs the device's wheel capabilities and the settings of
@@ -1219,6 +1233,37 @@ mod tests {
             assert!(plan.dispatch.side_gesture_bindings.is_empty());
             assert!(plan.target.spec.divert_gesture_buttons.is_empty());
         }
+    }
+
+    #[test]
+    fn an_app_switcher_dpi_button_streams_raw_xy_travel() {
+        let mut cfg = Config::default();
+        cfg.set_binding(
+            "2b042",
+            ButtonId::DpiToggle,
+            Binding::Single(Action::AppSwitcher),
+        );
+
+        let plan = plan_for_device(&cfg, "2b042", route(), None, 0, false);
+        assert_eq!(plan.target.spec.motion_buttons, [ButtonId::DpiToggle]);
+        assert_eq!(
+            plan.target.spec.divert_gesture_buttons,
+            DPI_MODE_SHIFT_CIDS
+                .into_iter()
+                .map(|cid| (cid, ButtonId::DpiToggle))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !plan
+                .dispatch
+                .gesture_bindings
+                .contains_key(&ButtonId::DpiToggle),
+            "the press keeps its binding rather than a swipe map"
+        );
+
+        cfg.set_binding("2b042", ButtonId::DpiToggle, Binding::Single(Action::Copy));
+        let rebound = plan_for_device(&cfg, "2b042", route(), None, 0, false);
+        assert!(rebound.target.spec.motion_buttons.is_empty());
     }
 
     #[test]
