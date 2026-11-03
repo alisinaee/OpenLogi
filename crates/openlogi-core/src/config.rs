@@ -54,7 +54,7 @@ pub use settings::{
     DeviceViewMode, GlideShape, Lighting, MomentumParams, MomentumScrolling, MouseProfileTarget,
     OnboardMemory, SMARTSHIFT_AUTO_DISENGAGE_DEFAULT, SMARTSHIFT_MIN_AUTO_DISENGAGE,
     ScrollResolution, SmartShift, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity,
-    WheelMode,
+    WheelEasing, WheelFeel, WheelMode,
 };
 
 use crate::app::AppAliases;

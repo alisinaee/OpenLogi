@@ -321,6 +321,94 @@ pub struct AppSettings {
     /// Only macOS reads it.
     #[serde(default = "default_true")]
     pub show_desktop_switcher: bool,
+    /// Whether macOS may accelerate OpenLogi's smoothed wheel output, so a fast
+    /// spin scrolls farther per notch than a slow one. **On by default**
+    /// (today's behaviour: a smoothed wheel is posted as wheel ticks, which
+    /// macOS's own scroll acceleration scales). `false` posts every notch as
+    /// the same pixel distance, which macOS leaves alone, so each notch scrolls
+    /// the same distance at any speed. Only macOS reads it; elsewhere output is
+    /// already unaccelerated. Covers the diverted main wheel
+    /// ([`DeviceConfig::smooth_wheel`](crate::config::DeviceConfig::smooth_wheel))
+    /// and `smooth_scroll`.
+    #[serde(default = "default_true")]
+    pub scroll_acceleration: bool,
+    /// How long one smoothed wheel step takes to play out, in milliseconds,
+    /// clamped to [`WheelFeel::DURATION_MS_MIN`]`..=`[`WheelFeel::DURATION_MS_MAX`].
+    /// Defaults to [`WheelFeel::DURATION_MS_DEFAULT`].
+    #[serde(default = "default_smooth_wheel_duration_ms")]
+    pub smooth_wheel_duration_ms: u16,
+    /// The curve a smoothed wheel step follows. Defaults to `smooth`.
+    #[serde(default)]
+    pub smooth_wheel_easing: WheelEasing,
+}
+
+const fn default_smooth_wheel_duration_ms() -> u16 {
+    WheelFeel::DURATION_MS_DEFAULT
+}
+
+/// The curve one smoothed wheel step follows from its start to its target.
+/// Append-only: it rides the IPC wire inside [`AppSettings`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WheelEasing {
+    /// Cubic smoothstep: starts and ends at rest, so each notch eases in
+    /// (today's behaviour).
+    #[default]
+    Smooth,
+    /// Cubic ease-out: moves fastest at the start of a notch and settles
+    /// gently, with no slow ramp-in.
+    EaseOut,
+    /// Constant speed across the step.
+    Linear,
+}
+
+impl WheelEasing {
+    /// Normalized distance at normalized `progress`, clamped to `0..=1` on both
+    /// sides: `0` at the start, `1` at the end.
+    #[must_use]
+    pub fn ease(self, progress: f64) -> f64 {
+        let p = progress.clamp(0.0, 1.0);
+        match self {
+            Self::Smooth => p * p * (3.0 - 2.0 * p),
+            Self::EaseOut => 1.0 - (1.0 - p).powi(3),
+            Self::Linear => p,
+        }
+    }
+}
+
+/// Smoothed wheel output settings resolved for the agent: every value inside its
+/// range. Only [`AppSettings::wheel_feel`] builds one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WheelFeel {
+    /// Whether macOS may accelerate the output.
+    pub acceleration: bool,
+    /// The curve of one step.
+    pub easing: WheelEasing,
+    /// How long one step takes.
+    pub duration: Duration,
+}
+
+impl WheelFeel {
+    /// Shortest selectable step, ms.
+    pub const DURATION_MS_MIN: u16 = 40;
+    /// Longest selectable step, ms.
+    pub const DURATION_MS_MAX: u16 = 400;
+    /// Today's step length, ms.
+    pub const DURATION_MS_DEFAULT: u16 = 100;
+    /// Reference pixels one notch scrolls when [`Self::acceleration`] is off:
+    /// the momentum-scrolling default, about what a line event scrolls in a
+    /// native macOS view.
+    pub const PIXELS_PER_NOTCH: f64 = 28.0;
+}
+
+impl Default for WheelFeel {
+    fn default() -> Self {
+        Self {
+            acceleration: true,
+            easing: WheelEasing::Smooth,
+            duration: Duration::from_millis(u64::from(Self::DURATION_MS_DEFAULT)),
+        }
+    }
 }
 
 const SENSITIVITY_MIN: u8 = 1;
@@ -492,6 +580,20 @@ fn rounded_sensitivity(value: f32) -> u8 {
 }
 
 impl AppSettings {
+    /// The smoothed-wheel settings the agent runs with, the duration clamped
+    /// into its range.
+    #[must_use]
+    pub fn wheel_feel(&self) -> WheelFeel {
+        WheelFeel {
+            acceleration: self.scroll_acceleration,
+            easing: self.smooth_wheel_easing,
+            duration: Duration::from_millis(u64::from(
+                self.smooth_wheel_duration_ms
+                    .clamp(WheelFeel::DURATION_MS_MIN, WheelFeel::DURATION_MS_MAX),
+            )),
+        }
+    }
+
     /// `skip_serializing_if` helper: true when nothing diverges from the
     /// default, so empty settings don't clutter `config.toml`.
     #[must_use]
@@ -529,6 +631,9 @@ impl Default for AppSettings {
             lock_key_notifications: true,
             animate_desktop_switch: true,
             show_desktop_switcher: true,
+            scroll_acceleration: true,
+            smooth_wheel_duration_ms: WheelFeel::DURATION_MS_DEFAULT,
+            smooth_wheel_easing: WheelEasing::Smooth,
         }
     }
 }
@@ -1081,6 +1186,60 @@ mod tests {
             ThumbwheelSensitivity::from_rounded(f32::INFINITY),
             ThumbwheelSensitivity::MAX
         );
+    }
+
+    #[test]
+    fn wheel_feel_defaults_keep_todays_behaviour() {
+        let settings: AppSettings = toml::from_str("smooth_scroll = true").expect("parse");
+        assert!(settings.scroll_acceleration);
+        assert_eq!(settings.wheel_feel(), WheelFeel::default());
+        assert_eq!(settings.wheel_feel().duration, Duration::from_millis(100));
+        assert_eq!(settings.wheel_feel().easing, WheelEasing::Smooth);
+    }
+
+    #[test]
+    fn wheel_feel_round_trips_and_clamps() {
+        let settings: AppSettings = toml::from_str(
+            "scroll_acceleration = false\nsmooth_wheel_easing = \"ease_out\"\nsmooth_wheel_duration_ms = 5",
+        )
+        .expect("parse");
+        let feel = settings.wheel_feel();
+        assert!(!feel.acceleration);
+        assert_eq!(feel.easing, WheelEasing::EaseOut);
+        assert_eq!(feel.duration, Duration::from_millis(40));
+        let again: AppSettings =
+            toml::from_str(&toml::to_string(&settings).expect("serialize")).expect("parse");
+        assert_eq!(again, settings);
+
+        let long = AppSettings {
+            smooth_wheel_duration_ms: u16::MAX,
+            ..AppSettings::default()
+        };
+        assert_eq!(long.wheel_feel().duration, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn wheel_easing_curves_are_anchored_and_monotonic() {
+        for easing in [
+            WheelEasing::Smooth,
+            WheelEasing::EaseOut,
+            WheelEasing::Linear,
+        ] {
+            assert!(easing.ease(-1.0).abs() < f64::EPSILON);
+            assert!(easing.ease(0.0).abs() < f64::EPSILON);
+            assert!((easing.ease(1.0) - 1.0).abs() < f64::EPSILON);
+            assert!((easing.ease(2.0) - 1.0).abs() < f64::EPSILON);
+            let mut last = 0.0;
+            for step in 1..=20 {
+                let value = easing.ease(f64::from(step) / 20.0);
+                assert!(value >= last, "{easing:?} at {step}");
+                last = value;
+            }
+        }
+        // No ramp-in: ease-out and linear cover more than smoothstep early on.
+        let early = 0.1;
+        assert!(WheelEasing::EaseOut.ease(early) > WheelEasing::Linear.ease(early));
+        assert!(WheelEasing::Linear.ease(early) > WheelEasing::Smooth.ease(early));
     }
 
     #[test]

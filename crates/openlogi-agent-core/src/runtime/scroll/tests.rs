@@ -3,7 +3,9 @@
 
 use std::ops::{Deref, DerefMut};
 
-use openlogi_core::config::{GlideShape, MomentumParams, MomentumScrolling};
+use openlogi_core::config::{
+    GlideShape, MomentumParams, MomentumScrolling, WheelEasing, WheelFeel,
+};
 
 use super::*;
 
@@ -1835,4 +1837,88 @@ fn each_wheel_follows_its_own_devices_momentum_settings() {
     assert!(!engine.wheels.contains_key(&plain));
     assert!(engine.pixels_for(&gliding).is_some());
     assert_eq!(engine.pixels_for(&plain), None);
+}
+
+fn feel_engine(feel: WheelFeel) -> ScrollEngine {
+    let mut engine = ScrollEngine::default();
+    engine.set_feel(feel);
+    engine
+}
+
+/// Distance emitted by `at` for one notch under `feel`.
+fn notch_progress(feel: WheelFeel, after: Duration) -> f64 {
+    let base = Instant::now();
+    let mut engine = feel_engine(feel);
+    let mut frames = Vec::new();
+    engine.impulse(source(), wheel(0.0, 1.0), base, &mut |f| frames.push(f));
+    engine.advance_due(base + after, &mut |f| frames.push(f));
+    frames.iter().map(|f| f.delta.y).sum()
+}
+
+#[test]
+fn ease_out_has_no_slow_ramp_in_and_linear_is_constant() {
+    let smooth = notch_progress(WheelFeel::default(), Duration::from_millis(10));
+    let ease_out = notch_progress(
+        WheelFeel {
+            easing: WheelEasing::EaseOut,
+            ..WheelFeel::default()
+        },
+        Duration::from_millis(10),
+    );
+    let linear = notch_progress(
+        WheelFeel {
+            easing: WheelEasing::Linear,
+            ..WheelFeel::default()
+        },
+        Duration::from_millis(10),
+    );
+    assert!((smooth - 0.028).abs() < 1.0e-9, "{smooth}");
+    assert!((linear - 0.1).abs() < 1.0e-9, "{linear}");
+    assert!(ease_out > linear && linear > smooth);
+}
+
+#[test]
+fn step_duration_follows_the_setting() {
+    let feel = WheelFeel {
+        easing: WheelEasing::Linear,
+        duration: Duration::from_millis(200),
+        ..WheelFeel::default()
+    };
+    assert!((notch_progress(feel, Duration::from_millis(100)) - 0.5).abs() < 1.0e-9);
+    assert!((notch_progress(feel, Duration::from_millis(200)) - 1.0).abs() < 1.0e-9);
+}
+
+/// With acceleration off, every smoothed source posts pixels at the reference
+/// distance, so a notch is the same distance however fast it was spun.
+#[test]
+fn acceleration_off_posts_pixels_per_notch() {
+    let base = Instant::now();
+    let mut engine = feel_engine(WheelFeel {
+        acceleration: false,
+        ..WheelFeel::default()
+    });
+    let mut frames = Vec::new();
+    engine.wheel_impulse(
+        hidpp_source("mouse", 1),
+        wheel(0.0, 1.0),
+        1.0,
+        None,
+        base,
+        &mut |f| frames.push(f),
+    );
+    engine.advance_due(base + ANIMATION_DURATION, &mut |f| frames.push(f));
+    assert!(!frames.is_empty());
+    assert!(
+        frames
+            .iter()
+            .all(|f| matches!(f.unit, FrameUnit::Pixels { per_tick } if per_tick == WheelFeel::PIXELS_PER_NOTCH))
+    );
+    assert!((cumulative(&frames).y - WheelFeel::PIXELS_PER_NOTCH).abs() < 1.0e-9);
+
+    // The default keeps posting ticks.
+    let mut ticks = ScrollEngine::default();
+    let mut frames = Vec::new();
+    ticks.impulse(source(), wheel(0.0, 1.0), base, &mut |f| frames.push(f));
+    ticks.advance_due(base + ANIMATION_DURATION, &mut |f| frames.push(f));
+    assert!(frames.iter().all(|f| f.unit == FrameUnit::Ticks));
 }
