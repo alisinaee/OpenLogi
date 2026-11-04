@@ -80,6 +80,7 @@ pub(super) fn selected_easing_index(
 pub(super) fn general_page(
     controls: ScrollControls,
     momentum: Entity<MomentumPanel>,
+    pinned_apps: Entity<super::pinned_apps::PinnedAppsPanel>,
     registration_status: ServiceStatus,
     show_desktop_switcher: bool,
 ) -> SettingPage {
@@ -189,11 +190,22 @@ pub(super) fn general_page(
         .title(tr!("pointer.momentum_title"))
         .description(tr!("pointer.momentum_general_description"))
         .item(SettingItem::render(move |_, _, _| momentum.clone()));
-    SettingPage::new(tr!("app.general"))
+    let page = SettingPage::new(tr!("app.general"))
         .icon(IconName::Settings)
         .resettable(false)
         .group(group)
-        .group(momentum_group)
+        .group(momentum_group);
+    // The app switcher is a macOS feature, so only macOS lists its pins.
+    if cfg!(target_os = "macos") {
+        page.group(
+            SettingGroup::new()
+                .title(tr!("app.pinned_apps"))
+                .description(tr!("app.pinned_apps_description"))
+                .item(SettingItem::render(move |_, _, _| pinned_apps.clone())),
+        )
+    } else {
+        page
+    }
 }
 
 fn mouse_profile_target_item() -> SettingItem {

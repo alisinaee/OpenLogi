@@ -62,6 +62,7 @@ mod assets;
 mod diagnostics;
 mod general;
 mod language;
+mod pinned_apps;
 // Windows needs no privacy grants — the WH_MOUSE_LL hook and raw HID access
 // work without one — so there the page would render empty; register it only
 // where it has content. `SettingsPage::index` tracks the shift.
@@ -146,6 +147,8 @@ pub struct SettingsView {
     wheel_easing_select: Entity<SelectState<Vec<general::WheelEasingOption>>>,
     /// The General page's momentum-scrolling card: the app-wide default.
     momentum_panel: Entity<MomentumPanel>,
+    /// The General page's app switcher Pinned row editor.
+    pinned_apps_panel: Entity<pinned_apps::PinnedAppsPanel>,
     /// Shared app-wide updater, surfaced on the Updates page. A launch-time
     /// check result is already visible when the window opens.
     updater: Entity<Updater>,
@@ -242,6 +245,7 @@ impl SettingsView {
             .detach();
 
         let momentum_panel = cx.new(|cx| MomentumPanel::new(MomentumScope::General, cx));
+        let pinned_apps_panel = cx.new(|cx| pinned_apps::PinnedAppsPanel::new(window, cx));
 
         // Poll the agent's live event monitor while this window is open. The task
         // is held in the view, so closing Settings drops it, polling stops, and
@@ -289,6 +293,7 @@ impl SettingsView {
             wheel_duration: Self::wheel_duration_slider(cx),
             wheel_easing_select: Self::wheel_easing_select(window, cx),
             momentum_panel,
+            pinned_apps_panel,
             updater,
             updater_obs,
             copied: false,
@@ -605,6 +610,7 @@ impl Render for SettingsView {
                     wheel_easing: self.wheel_easing_select.clone(),
                 },
                 self.momentum_panel.clone(),
+                self.pinned_apps_panel.clone(),
                 self.registration_status,
                 AppState::try_read(cx)
                     .is_none_or(|state| state.app_settings().show_desktop_switcher),

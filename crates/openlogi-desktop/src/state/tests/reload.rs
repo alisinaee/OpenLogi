@@ -146,6 +146,53 @@ fn desktop_switcher_overlay_persists_and_reloads_only_when_changed() {
 }
 
 #[test]
+fn pinned_apps_are_cleaned_persisted_and_reload_only_when_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let (config, file) = ConfigFile::load_from_path(&path).unwrap();
+    let resolver = AssetResolver::new();
+    let (commands, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut state = AppState::new(Sources {
+        persistence: ConfigPersistence::UserFile(file),
+        ..Sources::in_memory(config, &resolver, commands)
+    });
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(crate::services::ipc::Command::LoadConfig(_))
+    ));
+
+    let events = state.commit_pinned_apps(
+        ["a.b.one", " ", "a.b.two", "a.b.one"]
+            .map(String::from)
+            .to_vec(),
+    );
+    assert_eq!(events, [StateEvent::SettingsChanged]);
+    let expected = vec!["a.b.one".to_string(), "a.b.two".to_string()];
+    assert_eq!(state.app_settings().pinned_apps, expected);
+    assert_eq!(
+        Config::load_from_path(&path).unwrap().app_settings.pinned_apps,
+        expected
+    );
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(crate::services::ipc::Command::ReloadConfig(_))
+    ));
+
+    let _ = state.commit_pinned_apps(expected.clone());
+    assert!(
+        receiver.try_recv().is_err(),
+        "an unchanged list must not reload"
+    );
+
+    let many: Vec<String> = (0..40).map(|i| format!("app.n{i}")).collect();
+    let _ = state.commit_pinned_apps(many);
+    assert_eq!(
+        state.app_settings().pinned_apps.len(),
+        openlogi_core::switcher_rows::MAX_PINNED
+    );
+}
+
+#[test]
 fn wheel_feel_settings_persist_and_reload_only_when_changed() {
     type Step = (
         &'static str,

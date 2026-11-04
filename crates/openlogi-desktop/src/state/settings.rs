@@ -10,6 +10,7 @@ use openlogi_core::config::{
     MouseProfileTarget, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity, WheelEasing,
     WheelFeel,
 };
+use openlogi_core::switcher_rows::MAX_PINNED;
 use openlogi_core::update_feed::UpdateChannel;
 
 impl AppState {
@@ -452,6 +453,26 @@ impl AppState {
         self.config
             .edit(|config| config.app_settings.desktop_switcher_show_apps = enabled);
         self.persist_and_reload("desktop switcher apps setting");
+        StateEvent::SettingsChanged.into()
+    }
+    /// Replace the app switcher's Pinned row and persist it. Duplicates and
+    /// blank identifiers are dropped and the list is cut to
+    /// [`MAX_PINNED`], so what is stored is what the switcher can show. The
+    /// agent reads the new list on config reload. An unchanged list writes
+    /// nothing and is still reported.
+    pub fn commit_pinned_apps(&mut self, apps: Vec<String>) -> StateEvents {
+        let mut pinned: Vec<String> = Vec::with_capacity(apps.len().min(MAX_PINNED));
+        for app in apps {
+            if !app.trim().is_empty() && !pinned.contains(&app) && pinned.len() < MAX_PINNED {
+                pinned.push(app);
+            }
+        }
+        if self.config.app_settings.pinned_apps == pinned {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.pinned_apps = pinned);
+        self.persist_and_reload("pinned apps setting");
         StateEvent::SettingsChanged.into()
     }
     /// Toggle macOS acceleration of the smoothed wheel and persist it. The
