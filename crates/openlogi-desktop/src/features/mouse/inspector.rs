@@ -89,14 +89,20 @@ pub(super) fn hold_seconds(ms: u16) -> String {
     format!("{}.{}", tenths / 10, tenths % 10)
 }
 
-/// A tap-and-hold button's card text: its tap action, then what holding does.
+/// A tap-and-hold button's card text: its tap action, then the hold time in
+/// milliseconds and what holding does, such as `tap: Back / hold 500 ms: Copy`.
 pub(super) fn tap_hold_label(tap: &str, binding: &LongPressBinding) -> gpui::SharedString {
-    let hold = tr!(
+    tr!(
         "actions.hold_summary",
-        seconds => hold_seconds(u16::try_from(binding.threshold().as_millis()).unwrap_or(u16::MAX)),
+        tap => tap.to_string(),
+        ms => hold_millis(binding).to_string(),
         action => localized_action_label(binding.long()).to_string()
-    );
-    format!("{tap} · {hold}").into()
+    )
+}
+
+/// A tap-and-hold button's hold time in whole milliseconds.
+fn hold_millis(binding: &LongPressBinding) -> u16 {
+    u16::try_from(binding.threshold().as_millis()).unwrap_or(u16::MAX)
 }
 
 /// Which action of a tap-and-hold button the open picker chooses.
@@ -392,7 +398,7 @@ fn tap_hold_editor(
     picker: ActionPickerContext<'_>,
     pal: Palette,
 ) -> gpui::AnyElement {
-    let committed = u16::try_from(long_press.threshold().as_millis()).unwrap_or(u16::MAX);
+    let committed = hold_millis(long_press);
     v_flex()
         .gap_3()
         .child(selection_card(
@@ -419,8 +425,8 @@ fn tap_hold_editor(
                 Slider::new(slider.slider()).horizontal(),
             )
             .value(
-                format!("{} s", hold_seconds(slider.shown(committed))),
-                ["3.0 s"],
+                format!("{} ms", slider.shown(committed)),
+                ["3000 ms"],
             )
         }))
         .into_any_element()
@@ -1173,6 +1179,20 @@ fn gesture_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tap_and_hold_card_names_the_tap_then_the_hold_in_milliseconds() {
+        let binding = LongPressBinding::new(Action::BrowserBack, Action::Copy).with_hold(
+            openlogi_core::binding::HoldThreshold::try_from(500).expect("500 ms is in range"),
+        );
+
+        let label = tap_hold_label("Back", &binding);
+
+        assert_eq!(
+            label.as_ref(),
+            format!("tap: Back / hold 500 ms: {}", localized_action_label(&Action::Copy))
+        );
+    }
 
     #[test]
     fn default_profile_offers_gestures_for_every_supported_button() {
