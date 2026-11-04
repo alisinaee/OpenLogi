@@ -129,6 +129,8 @@ pub(crate) fn split(notices: Vec<Notice>) -> (Option<Switcher>, Vec<Notice>) {
                 });
             }
             NoticeKind::LowBattery { .. } => cards.push(notice),
+            // Drawn by `app_switcher`, not here, until its module is wired in.
+            NoticeKind::AppSwitcher { .. } => {}
         }
     }
     (switcher, cards)

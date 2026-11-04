@@ -206,6 +206,11 @@ pub(crate) fn notice_text(kind: &NoticeKind) -> NoticeText {
             title: format!("{current} / {count}").into(),
             detail: SharedString::default(),
         },
+        // Drawn by `app_switcher`, never as a card.
+        NoticeKind::AppSwitcher { .. } => NoticeText {
+            title: SharedString::default(),
+            detail: SharedString::default(),
+        },
     }
 }
 

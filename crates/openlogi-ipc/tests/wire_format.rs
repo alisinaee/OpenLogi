@@ -42,6 +42,7 @@ use openlogi_core::config::{
 use openlogi_core::desktop_schema::{
     DesktopSchema, SchemaApp, SchemaWindow, SpaceSchema, UnitRect,
 };
+use openlogi_core::switcher_rows::{SwitcherRow, SwitcherRows, SwitcherView, SwitcherWindow};
 use openlogi_core::device::{
     BatteryInfo, BatteryLevel, BatteryStatus, Capabilities, ChangedOnLight, DeviceInventory,
     DeviceKind, DeviceModelInfo, DeviceTransports, LightCapabilities, LightState, LightValueRange,
@@ -494,6 +495,33 @@ fn notices() {
             language: None,
         },
         "040109010201010103612e6202414200010101000102030400",
+    );
+    assert_wire(
+        &NoticeObservation {
+            generation: 5,
+            notices: vec![Notice {
+                id: 11,
+                kind: NoticeKind::AppSwitcher {
+                    view: SwitcherView {
+                        windows: vec![SwitcherWindow {
+                            id: 7,
+                            pid: 42,
+                            app: ForegroundApp {
+                                id: "a.b".into(),
+                                display_name: "AB".into(),
+                            },
+                            title: String::new(),
+                        }],
+                        rows: SwitcherRows::default(),
+                        icons: BTreeMap::new(),
+                        row: Some(SwitcherRow::Windows),
+                        column: Some(0),
+                    },
+                },
+            }],
+            language: None,
+        },
+        "05010b0201075403612e6202414200000000000100010000",
     );
 }
 
