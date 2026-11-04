@@ -13,7 +13,7 @@ use crate::ui::theme::FocusRingStyle as _;
 use crate::ui::theme::Typography as _;
 use gpui_base::Button as BaseButton;
 use gpui_component::radio::{Radio, RadioGroup};
-use openlogi_core::config::{MouseProfileTarget, WheelEasing, WheelFeel};
+use openlogi_core::config::{DesktopSwitcherSize, MouseProfileTarget, WheelEasing, WheelFeel};
 
 use crate::features::pointer::momentum::MomentumPanel;
 use crate::platform::registration::ServiceStatus;
@@ -141,6 +141,7 @@ pub(super) fn general_page(
             .item(animate_desktop_switch_item())
             .item(show_desktop_switcher_item())
             .item(desktop_switcher_show_apps_item(show_desktop_switcher))
+            .item(desktop_switcher_size_item(show_desktop_switcher))
     } else {
         group
     };
@@ -302,6 +303,46 @@ fn desktop_switcher_show_apps_item(show_desktop_switcher: bool) -> SettingItem {
         ),
     )
     .description(tr!("app.desktop_switcher_show_apps_description"))
+    .disabled(!show_desktop_switcher)
+}
+
+/// The segmented picker for how large the desktop switcher is drawn. Off
+/// while the switcher itself is off, like the apps switch.
+fn desktop_switcher_size_item(show_desktop_switcher: bool) -> SettingItem {
+    SettingItem::new(
+        tr!("app.desktop_switcher_size"),
+        SettingField::render(|_, _, cx| {
+            let size = AppState::try_read(cx)
+                .map_or_else(Default::default, |s| s.app_settings().desktop_switcher_size);
+            let selected = DesktopSwitcherSize::ALL
+                .iter()
+                .position(|choice| *choice == size)
+                .unwrap_or_default();
+            RadioGroup::horizontal("desktop-switcher-size")
+                .child(
+                    Radio::new("desktop-switcher-size-small")
+                        .label(tr!("app.desktop_switcher_size_small"))
+                        .debug_selector(|| "desktop-switcher-size-small".into()),
+                )
+                .child(
+                    Radio::new("desktop-switcher-size-medium")
+                        .label(tr!("app.desktop_switcher_size_medium"))
+                        .debug_selector(|| "desktop-switcher-size-medium".into()),
+                )
+                .child(
+                    Radio::new("desktop-switcher-size-large")
+                        .label(tr!("app.desktop_switcher_size_large"))
+                        .debug_selector(|| "desktop-switcher-size-large".into()),
+                )
+                .selected_index(Some(selected))
+                .on_change(|index, _, cx| {
+                    if let Some(size) = DesktopSwitcherSize::ALL.get(*index).copied() {
+                        AppState::apply(cx, |state| state.commit_desktop_switcher_size(size));
+                    }
+                })
+        }),
+    )
+    .description(tr!("app.desktop_switcher_size_description"))
     .disabled(!show_desktop_switcher)
 }
 

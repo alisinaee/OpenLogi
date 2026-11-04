@@ -6,9 +6,9 @@ use super::{AppState, StateEvent};
 use crate::platform::app_icon::AppIconExt as _;
 use gpui_component::ThemeMode;
 use openlogi_core::config::{
-    AppIcon, AppSettings, Appearance, AssetSourcePreference, DeviceViewMode, MomentumScrolling,
-    MouseProfileTarget, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity, WheelEasing,
-    WheelFeel,
+    AppIcon, AppSettings, Appearance, AssetSourcePreference, DesktopSwitcherSize, DeviceViewMode,
+    MomentumScrolling, MouseProfileTarget, ThumbwheelSensitivity, UiScale,
+    VerticalScrollSensitivity, WheelEasing, WheelFeel,
 };
 use openlogi_core::switcher_rows::MAX_PINNED;
 use openlogi_core::update_feed::UpdateChannel;
@@ -453,6 +453,20 @@ impl AppState {
         self.config
             .edit(|config| config.app_settings.desktop_switcher_show_apps = enabled);
         self.persist_and_reload("desktop switcher apps setting");
+        StateEvent::SettingsChanged.into()
+    }
+
+    /// Set how large the desktop switcher is drawn and persist it. The agent
+    /// reads the new size on config reload. An already-set size writes
+    /// nothing and is still reported; disk failures restore the persisted
+    /// size.
+    pub fn commit_desktop_switcher_size(&mut self, size: DesktopSwitcherSize) -> StateEvents {
+        if self.config.app_settings.desktop_switcher_size == size {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.desktop_switcher_size = size);
+        self.persist_and_reload("desktop switcher size setting");
         StateEvent::SettingsChanged.into()
     }
     /// Replace the app switcher's Pinned row and persist it. Duplicates and
