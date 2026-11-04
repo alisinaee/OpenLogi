@@ -37,7 +37,7 @@ use openlogi_core::binding::{
     Action, ActionRingIcon, ActionRingSlot, ButtonId, GridKey, GridSlot, KeyCombo, KeypadPage,
 };
 use openlogi_core::config::{
-    ConfigRevision, FlowPeerName, FlowPublicKey, Lighting, ScrollResolution,
+    ConfigRevision, DesktopSwitcherSize, FlowPeerName, FlowPublicKey, Lighting, ScrollResolution,
 };
 use openlogi_core::desktop_schema::{
     DesktopSchema, SchemaApp, SchemaWindow, SpaceSchema, UnitRect,
@@ -457,11 +457,12 @@ fn notices() {
                     count: 5,
                     current: 2,
                     schema: None,
+                    size: DesktopSwitcherSize::Medium,
                 },
             }],
             language: None,
         },
-        "0401090105020000",
+        "040109010502000100",
     );
     assert_wire(
         &NoticeObservation {
@@ -490,11 +491,12 @@ fn notices() {
                             }],
                         }],
                     }),
+                    size: DesktopSwitcherSize::Large,
                 },
             }],
             language: None,
         },
-        "040109010201010103612e6202414200010101000102030400",
+        "040109010201010103612e620241420001010100010203040200",
     );
     assert_wire(
         &NoticeObservation {

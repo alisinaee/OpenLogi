@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use openlogi_core::app::ForegroundApp;
 use openlogi_core::binding::{ActionRingIcon, ActionRingSlot};
-use openlogi_core::config::{ConfigRevision, FlowPeerName, FlowPublicKey, Lighting};
+use openlogi_core::config::{
+    ConfigRevision, DesktopSwitcherSize, FlowPeerName, FlowPublicKey, Lighting,
+};
 use openlogi_core::desktop_schema::DesktopSchema;
 use openlogi_core::device::{
     BatteryInfo, ChangedOnLight, DeviceInventory, DeviceKind, LightState, LockKey, StandaloneDevice,
@@ -185,7 +187,9 @@ pub use succession::Identity;
 ///      `Action::AppSwitcher` and `Binding::AppSwitcher` appended — the app
 ///      switcher button. `NoticeKind::AppSwitcher` appended after it — the
 ///      switcher's rows and selection while the button's mouse travel moves
-///      the cursor across them, as a [`SwitcherView`].
+///      the cursor across them, as a [`SwitcherView`]. `size` appended to
+///      `NoticeKind::DesktopSwitch` after its schema — the switcher's
+///      [`DesktopSwitcherSize`].
 pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the
@@ -889,6 +893,9 @@ pub enum NoticeKind {
         /// numbers: the user turned it off, or the windows could not be read
         /// in time.
         schema: Option<DesktopSchema>,
+        /// How large to draw the switcher. Appended after `schema`, so a
+        /// build that predates it cannot decode this notice.
+        size: DesktopSwitcherSize,
     },
     /// The app switcher, open while its button is held and the mouse has
     /// moved: the rows and the cursor. A newer one replaces the one on show;

@@ -20,9 +20,10 @@ use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyWindowHandle, App, AppContext as _, Context,
-    FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString, Size, Styled, Window,
-    WindowHandle, div, hsla, img, px, size,
+    FontWeight, Hsla, IntoElement, ParentElement, Pixels, Render, SharedString, Size, Styled,
+    Window, WindowHandle, div, hsla, img, px, size,
 };
+use openlogi_core::config::DesktopSwitcherSize;
 use openlogi_core::desktop_schema::{DesktopSchema, MAX_ICONS, SchemaApp, tint_hue};
 use openlogi_ipc::{DESKTOP_SWITCH_FADE, DESKTOP_SWITCH_HOLD, Notice, NoticeKind};
 use tracing::warn;
@@ -107,6 +108,8 @@ pub(crate) struct Switcher {
     pub(crate) current: u16,
     /// What each desktop holds, when the agent could read it.
     pub(crate) schema: Option<Arc<DesktopSchema>>,
+    /// How large the boxes and their map are drawn.
+    pub(crate) size: DesktopSwitcherSize,
 }
 
 /// Take the switcher out of the agent's notices. Returns the newest one and
@@ -120,12 +123,14 @@ pub(crate) fn split(notices: Vec<Notice>) -> (Option<Switcher>, Vec<Notice>) {
                 count,
                 current,
                 schema,
+                size,
             } => {
                 switcher = Some(Switcher {
                     serial: notice.id,
                     count,
                     current,
                     schema: schema.map(Arc::new),
+                    size,
                 });
             }
             NoticeKind::LowBattery { .. } => cards.push(notice),
@@ -152,8 +157,9 @@ fn mapped(switcher: &Switcher) -> bool {
     switcher.schema.is_some() && boxes(switcher) <= MAX_MAPPED_BOXES
 }
 
-/// What decides the window's size: two switchers with the same shape fit the
-/// same window, so the open one is updated in place. Whether a report carries
+/// What decides the window's size, with the size setting: two switchers with
+/// the same shape and size fit the same window, so the open one is updated in
+/// place. Whether a report carries
 /// the schema is deliberately not part of it: a roll mixes mapped and plain
 /// reports, and the window must never be replaced mid-roll. A row that can be
 /// mapped always gets the mapped size; its plain boxes sit centred inside it.
@@ -162,21 +168,44 @@ fn shape(switcher: &Switcher) -> (u16, bool) {
     (boxes, boxes <= MAX_MAPPED_BOXES)
 }
 
-/// The width and height of one box.
-fn tile_size(mapped: bool) -> (f32, f32) {
-    if mapped {
-        (TILE_W, TILE_H)
-    } else {
-        (BOX_SIZE, BOX_SIZE)
+/// The standard geometry scaled to one switcher size. The overlay draws every
+/// length through it, so the whole switcher grows and shrinks together.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Scale(f32);
+
+impl Scale {
+    fn of(size: DesktopSwitcherSize) -> Self {
+        Self(size.scale())
+    }
+
+    /// A standard length, scaled.
+    fn len(self, standard: f32) -> f32 {
+        standard * self.0
+    }
+
+    /// A standard length, scaled, as pixels.
+    fn px(self, standard: f32) -> Pixels {
+        px(self.len(standard))
     }
 }
 
-fn window_size((boxes, mapped): (u16, bool)) -> Size<gpui::Pixels> {
+/// The width and height of one box.
+fn tile_size(mapped: bool, scale: Scale) -> (f32, f32) {
+    if mapped {
+        (scale.len(TILE_W), scale.len(TILE_H))
+    } else {
+        (scale.len(BOX_SIZE), scale.len(BOX_SIZE))
+    }
+}
+
+fn window_size((boxes, mapped): (u16, bool), scale: Scale) -> Size<Pixels> {
     let boxes = f32::from(boxes);
-    let (tile_w, tile_h) = tile_size(mapped);
+    let (tile_w, tile_h) = tile_size(mapped, scale);
+    let gap = scale.len(BOX_GAP);
+    let pad = scale.len(CARD_PAD + INSET);
     size(
-        px(boxes * tile_w + (boxes - 1.0) * BOX_GAP + 2.0 * (CARD_PAD + INSET)),
-        px(tile_h + 2.0 * (CARD_PAD + INSET)),
+        px(boxes * tile_w + (boxes - 1.0) * gap + 2.0 * pad),
+        px(tile_h + 2.0 * pad),
     )
 }
 
@@ -244,45 +273,53 @@ fn icon_element(path: &Path, side: f32) -> AnyElement {
 }
 
 /// One mapped box.
-fn mapped_tile(number: u16, is_current: bool, contents: &Contents) -> impl IntoElement {
+fn mapped_tile(
+    number: u16,
+    is_current: bool,
+    contents: &Contents,
+    scale: Scale,
+) -> impl IntoElement {
     let text = if is_current { CURRENT_TEXT } else { IDLE_TEXT };
     let face = match contents {
         Contents::Windows { outlines, .. } => div()
             .relative()
-            .w(px(MAP_W))
-            .h(px(MAP_H))
-            .rounded(px(4.0))
+            .w(scale.px(MAP_W))
+            .h(scale.px(MAP_H))
+            .rounded(scale.px(4.0))
             .overflow_hidden()
             .bg(MAP_BACKDROP)
             .children(outlines.iter().map(|outline| {
                 let [x, y, width, height] = outline.rect;
                 div()
                     .absolute()
-                    .left(px(x))
-                    .top(px(y))
-                    .w(px(width))
-                    .h(px(height))
-                    .rounded(px(2.0))
+                    .left(scale.px(x))
+                    .top(scale.px(y))
+                    .w(scale.px(width))
+                    .h(scale.px(height))
+                    .rounded(scale.px(2.0))
                     .border_1()
                     .border_color(hsla(outline.hue, 0.70, 0.66, 0.9))
                     .bg(hsla(outline.hue, 0.70, 0.55, 0.38))
             })),
         Contents::Fullscreen { name, icon } => div()
-            .w(px(MAP_W))
-            .h(px(MAP_H))
-            .rounded(px(4.0))
+            .w(scale.px(MAP_W))
+            .h(scale.px(MAP_H))
+            .rounded(scale.px(4.0))
             .bg(MAP_BACKDROP)
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
-            .gap(px(3.0))
-            .children(icon.as_ref().map(|icon| icon_element(icon, BIG_ICON)))
+            .gap(scale.px(3.0))
+            .children(
+                icon.as_ref()
+                    .map(|icon| icon_element(icon, scale.len(BIG_ICON))),
+            )
             .child(
                 div()
-                    .max_w(px(MAP_W - 8.0))
+                    .max_w(scale.px(MAP_W - 8.0))
                     .truncate()
-                    .text_size(px(10.0))
+                    .text_size(scale.px(10.0))
                     .text_color(IDLE_TEXT)
                     .child(SharedString::from(name.clone())),
             ),
@@ -292,35 +329,35 @@ fn mapped_tile(number: u16, is_current: bool, contents: &Contents) -> impl IntoE
         Contents::Fullscreen { .. } => &[],
     };
     div()
-        .w(px(TILE_W))
-        .h(px(TILE_H))
-        .p(px(TILE_PAD))
+        .w(scale.px(TILE_W))
+        .h(scale.px(TILE_H))
+        .p(scale.px(TILE_PAD))
         .flex()
         .flex_col()
-        .gap(px(4.0))
-        .rounded(px(8.0))
+        .gap(scale.px(4.0))
+        .rounded(scale.px(8.0))
         .border_2()
         .border_color(if is_current { CURRENT_BOX } else { IDLE_BOX })
         .bg(IDLE_BOX)
         .child(face)
         .child(
             div()
-                .h(px(ROW_H))
+                .h(scale.px(ROW_H))
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(4.0))
+                .gap(scale.px(4.0))
                 .child(
                     div()
-                        .min_w(px(ROW_H))
-                        .h(px(ROW_H - 4.0))
-                        .px(px(5.0))
+                        .min_w(scale.px(ROW_H))
+                        .h(scale.px(ROW_H - 4.0))
+                        .px(scale.px(5.0))
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(7.0))
+                        .rounded(scale.px(7.0))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_size(px(12.0))
+                        .text_size(scale.px(12.0))
                         .bg(if is_current {
                             CURRENT_BOX
                         } else {
@@ -329,11 +366,10 @@ fn mapped_tile(number: u16, is_current: bool, contents: &Contents) -> impl IntoE
                         .text_color(text)
                         .child(number.to_string()),
                 )
-                .children(
-                    icons
-                        .iter()
-                        .filter_map(|icon| icon.as_ref().map(|icon| icon_element(icon, ICON))),
-                ),
+                .children(icons.iter().filter_map(|icon| {
+                    icon.as_ref()
+                        .map(|icon| icon_element(icon, scale.len(ICON)))
+                })),
         )
 }
 
@@ -345,6 +381,7 @@ pub(crate) struct SwitcherView {
 impl Render for SwitcherView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let (serial, current) = (self.switcher.serial, self.switcher.current);
+        let scale = Scale::of(self.switcher.size);
         let schema = self
             .switcher
             .schema
@@ -354,24 +391,24 @@ impl Render for SwitcherView {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(BOX_GAP))
-            .p(px(CARD_PAD))
-            .rounded(px(14.0))
+            .gap(scale.px(BOX_GAP))
+            .p(scale.px(CARD_PAD))
+            .rounded(scale.px(14.0))
             .bg(CARD)
             .shadow_lg()
             .children((1..=boxes(&self.switcher)).map(|number| {
                 let is_current = number == current;
                 if let Some(schema) = &schema {
                     let contents = contents(schema, usize::from(number - 1));
-                    return mapped_tile(number, is_current, &contents).into_any_element();
+                    return mapped_tile(number, is_current, &contents, scale).into_any_element();
                 }
                 div()
-                    .w(px(BOX_SIZE))
-                    .h(px(BOX_SIZE))
+                    .w(scale.px(BOX_SIZE))
+                    .h(scale.px(BOX_SIZE))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(8.0))
+                    .rounded(scale.px(8.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .bg(if is_current { CURRENT_BOX } else { IDLE_BOX })
                     .text_color(if is_current { CURRENT_TEXT } else { IDLE_TEXT })
@@ -418,9 +455,9 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
     };
     let mut reused = false;
     for view in open {
-        let same_row = view
-            .read(cx)
-            .is_ok_and(|view| shape(&view.switcher) == shape(&switcher));
+        let same_row = view.read(cx).is_ok_and(|view| {
+            shape(&view.switcher) == shape(&switcher) && view.switcher.size == switcher.size
+        });
         if same_row && !reused {
             let next = switcher.clone();
             reused = view
@@ -438,9 +475,10 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
     }
     // Centred like the system app switcher; Windows keeps its taskbar-anchored notice spot.
     #[cfg(not(target_os = "windows"))]
-    let mut placement = NoticePlacement::capture_centred(cx, window_size(shape(&switcher)));
+    let scale = Scale::of(switcher.size);
+    let mut placement = NoticePlacement::capture_centred(cx, window_size(shape(&switcher), scale));
     #[cfg(target_os = "windows")]
-    let mut placement = match NoticePlacement::capture(cx, window_size(shape(&switcher))) {
+    let mut placement = match NoticePlacement::capture(cx, window_size(shape(&switcher), scale)) {
         Ok(placement) => placement,
         Err(error) => {
             warn!(%error, "could not locate the desktop switcher display");
@@ -475,6 +513,7 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
 
 #[cfg(test)]
 mod tests {
+    use openlogi_core::config::DesktopSwitcherSize;
     use openlogi_core::desktop_schema::{SchemaWindow, SpaceSchema, UnitRect};
     use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus, DeviceKind};
 
@@ -502,6 +541,7 @@ mod tests {
                 count,
                 current,
                 schema: None,
+                size: DesktopSwitcherSize::Medium,
             },
         }
     }
@@ -516,6 +556,7 @@ mod tests {
                 count: 4,
                 current: 2,
                 schema: None,
+                size: DesktopSwitcherSize::Medium,
             }),
             "the newest switch shows"
         );
@@ -538,6 +579,7 @@ mod tests {
             count,
             current: 2,
             schema: None,
+            size: DesktopSwitcherSize::Medium,
         }
     }
 
@@ -653,8 +695,11 @@ mod tests {
             );
             assert_eq!(shape(&plain_report), shape(&mapped_report), "{count}");
             assert_eq!(
-                window_size(shape(&plain_report)),
-                window_size(shape(&mapped_report))
+                window_size(shape(&plain_report), Scale::of(DesktopSwitcherSize::Medium)),
+                window_size(
+                    shape(&mapped_report),
+                    Scale::of(DesktopSwitcherSize::Medium)
+                )
             );
         }
     }
@@ -674,7 +719,23 @@ mod tests {
             ..mapped_switcher
         };
         assert_eq!(shape(&wide), (MAX_MAPPED_BOXES + 1, false));
-        let (plain_w, mapped_w) = (window_size((3, false)).width, window_size((3, true)).width);
+        let medium = Scale::of(DesktopSwitcherSize::Medium);
+        let (plain_w, mapped_w) = (
+            window_size((3, false), medium).width,
+            window_size((3, true), medium).width,
+        );
         assert!(mapped_w > plain_w);
+    }
+
+    #[test]
+    fn the_size_setting_scales_the_whole_switcher() {
+        let width = |size| window_size((3, true), Scale::of(size)).width;
+        let (small, medium, large) = (
+            width(DesktopSwitcherSize::Small),
+            width(DesktopSwitcherSize::Medium),
+            width(DesktopSwitcherSize::Large),
+        );
+        assert!(small < medium && medium < large, "{small} {medium} {large}");
+        assert_eq!(medium, window_size((3, true), Scale(1.0)).width);
     }
 }

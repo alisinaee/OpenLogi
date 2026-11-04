@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use openlogi_core::config::AppSettings;
+use openlogi_core::config::{AppSettings, DesktopSwitcherSize};
 use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus, DeviceKind};
 use openlogi_ipc::{NoticeKind, OBSERVE_HOLD};
 
@@ -292,8 +292,8 @@ async fn an_unchanged_board_answers_after_the_hold() {
 async fn a_newer_desktop_switch_replaces_the_older_and_keeps_battery_notices() {
     let board = NoticeBoard::default();
     board.post(low_battery("MX"), None);
-    board.post_desktop_switch(4, 1, None, None);
-    board.post_desktop_switch(4, 2, None, None);
+    board.post_desktop_switch(4, 1, None, DesktopSwitcherSize::Medium, None);
+    board.post_desktop_switch(4, 2, None, DesktopSwitcherSize::Medium, None);
     let observed = board.observe(0).await;
     let kinds: Vec<_> = observed.notices.iter().map(|n| &n.kind).collect();
     assert_eq!(kinds.len(), 2);
@@ -304,6 +304,7 @@ async fn a_newer_desktop_switch_replaces_the_older_and_keeps_battery_notices() {
             count: 4,
             current: 2,
             schema: None,
+            size: DesktopSwitcherSize::Medium,
         }
     );
 }
@@ -332,7 +333,7 @@ fn optimistic_desktop_reports_reuse_the_last_schema() {
 #[test]
 fn the_app_switcher_replaces_a_desktop_switch_and_ends_with_its_press() {
     let board = NoticeBoard::default();
-    board.post_desktop_switch(4, 1, None, None);
+    board.post_desktop_switch(4, 1, None, DesktopSwitcherSize::Medium, None);
     board.post_app_switcher(openlogi_core::switcher_rows::SwitcherView::default(), None);
     let shown = |board: &NoticeBoard| {
         board

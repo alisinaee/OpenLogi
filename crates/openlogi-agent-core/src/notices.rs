@@ -13,7 +13,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use openlogi_core::binding::APP_SWITCHER_HOLD_LIMIT;
-use openlogi_core::config::AppSettings;
+use openlogi_core::config::{AppSettings, DesktopSwitcherSize};
 use openlogi_core::desktop_schema::DesktopSchema;
 use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus};
 use openlogi_core::switcher_rows::SwitcherView;
@@ -114,6 +114,7 @@ impl NoticeBoard {
         count: u16,
         current: u16,
         schema: Option<DesktopSchema>,
+        size: DesktopSwitcherSize,
         language: Option<String>,
     ) {
         self.post_for(
@@ -121,6 +122,7 @@ impl NoticeBoard {
                 count,
                 current,
                 schema,
+                size,
             },
             language,
             DESKTOP_SWITCH_HOLD + DESKTOP_SWITCH_FADE,

@@ -2431,6 +2431,7 @@ fn set_desktop_switcher(observable: &Arc<ObservableState>, settings: &AppSetting
     let observer = settings.show_desktop_switcher.then(|| {
         let observable = Arc::clone(observable);
         let language = settings.language.clone();
+        let size = settings.desktop_switcher_size;
         let carry = crate::notices::SchemaCarry::default();
         Arc::new(move |position: openlogi_inject::DesktopPosition| {
             let schema = carry.carry(position.count, position.schema);
@@ -2438,6 +2439,7 @@ fn set_desktop_switcher(observable: &Arc<ObservableState>, settings: &AppSetting
                 position.count,
                 position.current,
                 schema,
+                size,
                 language.clone(),
             );
         }) as openlogi_inject::DesktopObserver
