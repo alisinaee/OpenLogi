@@ -566,6 +566,8 @@ pub struct Orchestrator {
     devices: Vec<AgentDevice>,
     current: usize,
     current_app: Option<String>,
+    /// What the foreground-app watcher has seen, for the switcher's rows.
+    app_usage: crate::app_usage::AppUsageStore,
     pointer_context: openlogi_hook::PointerContext,
     /// The latest inventory snapshot, kept so the IPC server can answer the
     /// GUI's `inventory()` polls without re-enumerating (the agent owns all
@@ -760,6 +762,7 @@ impl Orchestrator {
             devices: Vec::new(),
             current: 0,
             current_app: None,
+            app_usage: crate::app_usage::AppUsageStore::in_memory(),
             pointer_context: openlogi_hook::PointerContext {
                 app: None,
                 target: openlogi_hook::PointerTarget::Unavailable,
@@ -2043,6 +2046,23 @@ impl Orchestrator {
         }
     }
 
+    /// Keep the app-usage history in `store`, which may already hold one from
+    /// an earlier run.
+    pub fn attach_app_usage(&mut self, store: crate::app_usage::AppUsageStore) {
+        self.app_usage = store;
+    }
+
+    /// The app switcher's Pinned, Recent and Most used rows, from the config's
+    /// pinned apps, the history, and the apps `running` now.
+    #[must_use]
+    pub fn switcher_rows(&self, running: &[String]) -> openlogi_core::switcher_rows::SwitcherRows {
+        self.app_usage.usage().rows(
+            &self.config.app_settings.pinned_apps,
+            running,
+            self.current_app.as_deref(),
+        )
+    }
+
     /// Foreground-app change → re-overlay per-app bindings on the hook maps and
     /// republish the capture plans, whose binding maps and divert sets are
     /// per-app effective too (HID++ dispatch reads them at event time). Both
@@ -2061,6 +2081,11 @@ impl Orchestrator {
     /// per-app override), so active button lifecycles must be canceled.
     pub fn set_current_app(&mut self, app: Option<ForegroundApp>) -> bool {
         let id = app.as_ref().map(|app| app.id.clone());
+        if id != self.current_app
+            && let Some(app) = &app
+        {
+            self.app_usage.record(app);
+        }
         self.observable.set_foreground(app);
         if id == self.current_app {
             return false;

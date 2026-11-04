@@ -59,6 +59,10 @@ pub(crate) async fn bootstrap(config: Config) -> Option<Core> {
         config,
         Arc::clone(&observable),
     )));
+    orchestrator
+        .lock()
+        .await
+        .attach_app_usage(openlogi_agent_core::app_usage::AppUsageStore::open_default());
     let shared = orchestrator.lock().await.shared();
     let inputs = InputServices::start(&shared)?;
     let backlight_overlay = BacklightOverlayManager::default();
