@@ -434,6 +434,7 @@ pub fn focus_window(pid: i32, window_id: u32) {
 
 /// Bring the running app with `bundle_id` to the front. `false` when no such
 /// app runs, or off macOS.
+#[must_use]
 pub fn activate_app(bundle_id: &str) -> bool {
     cfg_select! {
         target_os = "macos" => {
