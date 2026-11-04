@@ -91,7 +91,7 @@ use menu_shortcut::{MenuPress, MenuShortcut};
 use scroll::dispatch_scroll;
 pub(super) use scroll::{post_phased_scroll, post_scroll, post_smooth_scroll};
 pub(super) use spaces::{
-    natural_scrolling, set_desktop_observer, set_desktop_schema, set_desktop_switch,
+    natural_scrolling, open_windows, set_desktop_observer, set_desktop_schema, set_desktop_switch,
 };
 use spaces::{next_desktop, previous_desktop};
 use symbolic_hotkey::{capture_region, screenshot};

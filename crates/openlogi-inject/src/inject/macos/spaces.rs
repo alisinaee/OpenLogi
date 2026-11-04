@@ -1081,6 +1081,7 @@ fn number(info: &Dictionary, key: &'static str) -> Option<u64> {
 }
 
 mod schema;
+pub(crate) use schema::open_windows;
 
 #[cfg(test)]
 mod tests;

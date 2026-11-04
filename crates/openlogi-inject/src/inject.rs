@@ -7,7 +7,7 @@
 //! on macOS, uinput/D-Bus on Linux, SendInput on Windows.
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::sync::{LazyLock, Mutex, PoisonError};
 
@@ -415,6 +415,25 @@ pub fn set_desktop_observer(observer: Option<DesktopObserver>) {
         }
         _ => {
             let _ = observer;
+        }
+    }
+}
+
+/// The windows the app switcher lists, front-most first, with the icon file
+/// of each app that owns one. Frames and owners only, never titles, so
+/// reading them needs no Screen Recording permission. Only macOS lists
+/// windows; elsewhere the list is empty.
+#[must_use]
+pub fn open_windows() -> (
+    Vec<openlogi_core::switcher_rows::SwitcherWindow>,
+    BTreeMap<String, String>,
+) {
+    cfg_select! {
+        target_os = "macos" => {
+            macos::open_windows()
+        }
+        _ => {
+            (Vec::new(), BTreeMap::new())
         }
     }
 }

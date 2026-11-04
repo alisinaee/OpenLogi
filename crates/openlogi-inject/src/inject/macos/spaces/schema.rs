@@ -11,7 +11,7 @@
 //! Everything here is bounded: a read past its budget, or any failure, gives
 //! `None`, and the switcher falls back to plain numbered boxes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -29,10 +29,12 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CFArray, CFNumber, CFRetained, CFType};
 use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
 use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
+use openlogi_core::app::ForegroundApp;
 use openlogi_core::desktop_schema::{
     DesktopSchema, Frame, MAX_APPS, MAX_ICONS, MAX_SPACES, MAX_WINDOWS, SchemaApp, SchemaWindow,
     SpaceSchema, UnitRect,
 };
+use openlogi_core::switcher_rows::SwitcherWindow;
 
 use super::super::app_services;
 use super::{API, Dictionary, SpaceState, dictionary, get, number};
@@ -157,6 +159,46 @@ pub(super) fn gather(display: u32, state: &SpaceState, budget: Duration) -> Opti
         "desktop schema read"
     );
     Some(schema)
+}
+
+/// The windows the app switcher lists, front-most first, and the icon file of
+/// each app that owns one, rendered now when it is not on disk yet. Titles
+/// stay empty for the same reason the desktop map keeps none.
+pub(crate) fn open_windows() -> (Vec<SwitcherWindow>, BTreeMap<String, String>) {
+    let Some(catalog) = catalog() else {
+        return (Vec::new(), BTreeMap::new());
+    };
+    let mut apps: HashMap<c_int, Option<AppInfo>> = HashMap::new();
+    let mut windows = Vec::new();
+    for window in catalog {
+        let info = apps
+            .entry(window.pid)
+            .or_insert_with(|| app_for_pid(window.pid))
+            .clone();
+        if let Some(info) = info {
+            windows.push(SwitcherWindow {
+                id: window.id,
+                pid: window.pid,
+                app: ForegroundApp {
+                    id: info.id,
+                    display_name: info.name,
+                },
+                title: String::new(),
+            });
+        }
+    }
+    let mut icons = BTreeMap::new();
+    let Ok(dir) = openlogi_core::paths::data_dir().map(|dir| dir.join("desktop-icons")) else {
+        return (windows, icons);
+    };
+    for info in apps.into_values().flatten() {
+        let file = dir.join(icon_file_name(&info.id, Path::new(&info.bundle)));
+        let ready = file.exists() || render_icon(&info.bundle, &file);
+        if let Some(path) = ready.then(|| file.to_str()).flatten() {
+            icons.insert(info.id, path.to_owned());
+        }
+    }
+    (windows, icons)
 }
 
 /// Every normal window of every Space, front-most first, from the window list
