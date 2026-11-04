@@ -169,6 +169,22 @@ impl AppUsage {
         }
     }
 
+    /// Parse the persisted form.
+    ///
+    /// # Errors
+    /// The text is not a history this version wrote.
+    pub fn from_toml(text: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(text)
+    }
+
+    /// The persisted form.
+    ///
+    /// # Errors
+    /// The history cannot be written as TOML.
+    pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
+        toml::to_string(self)
+    }
+
     /// How many times `id` was brought to the front.
     #[must_use]
     pub fn count(&self, id: &str) -> u32 {
