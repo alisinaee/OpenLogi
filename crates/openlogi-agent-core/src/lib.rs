@@ -25,6 +25,7 @@ pub mod orchestrator;
 pub mod pointer_speed;
 pub mod receiver_access;
 pub mod runtime;
+pub mod switcher;
 pub mod watchers;
 
 pub use dpi::{DpiCycleState, DpiCycles};

@@ -12,9 +12,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use openlogi_core::binding::APP_SWITCHER_HOLD_LIMIT;
 use openlogi_core::config::AppSettings;
 use openlogi_core::desktop_schema::DesktopSchema;
 use openlogi_core::device::{BatteryInfo, BatteryLevel, BatteryStatus};
+use openlogi_core::switcher_rows::SwitcherView;
 use openlogi_ipc::{
     DESKTOP_SWITCH_FADE, DESKTOP_SWITCH_HOLD, Generation, Notice, NoticeKind, NoticeObservation,
     OBSERVE_HOLD,
@@ -31,6 +33,15 @@ const RECHARGED_PERCENT: u8 = 30;
 struct Posted {
     notice: Notice,
     ends: Instant,
+}
+
+/// Whether `kind` is one of the two switchers, which take the same place on
+/// the board.
+fn is_switcher(kind: &NoticeKind) -> bool {
+    matches!(
+        kind,
+        NoticeKind::DesktopSwitch { .. } | NoticeKind::AppSwitcher { .. }
+    )
 }
 
 /// What a republish does with the locale the observation carries.
@@ -116,6 +127,27 @@ impl NoticeBoard {
         );
     }
 
+    /// Show the app switcher's rows and cursor, replacing the one on show,
+    /// until [`Self::end_app_switcher`] or the hold's limit, whichever is first.
+    /// Callable from any thread: it takes a short lock and never waits.
+    pub fn post_app_switcher(&self, view: SwitcherView, language: Option<String>) {
+        self.post_for(
+            NoticeKind::AppSwitcher { view },
+            language,
+            APP_SWITCHER_HOLD_LIMIT,
+        );
+    }
+
+    /// Remove the app switcher from the board: its press ended.
+    pub fn end_app_switcher(&self) {
+        let mut posted = self.posted();
+        let before = posted.len();
+        posted.retain(|posted| !matches!(posted.notice.kind, NoticeKind::AppSwitcher { .. }));
+        if posted.len() != before {
+            self.publish(&posted, Locale::Keep);
+        }
+    }
+
     fn post_for(&self, kind: NoticeKind, language: Option<String>, lifetime: Duration) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let now = Instant::now();
@@ -123,11 +155,9 @@ impl NoticeBoard {
         // No overlay may be observing to end them, so a post drops what has
         // ended too: the list never grows past the notices still current.
         // Of the switchers only the latest shows, so it drops the older one.
-        let switcher = matches!(kind, NoticeKind::DesktopSwitch { .. });
-        posted.retain(|posted| {
-            posted.ends > now
-                && !(switcher && matches!(posted.notice.kind, NoticeKind::DesktopSwitch { .. }))
-        });
+        let switcher = is_switcher(&kind);
+        posted
+            .retain(|posted| posted.ends > now && !(switcher && is_switcher(&posted.notice.kind)));
         posted.push(Posted {
             notice: Notice { id, kind },
             ends: now + lifetime,

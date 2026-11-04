@@ -17,6 +17,7 @@ use openlogi_agent_core::observable::ObservableState;
 use openlogi_agent_core::orchestrator::{Orchestrator, SharedHandles};
 use openlogi_agent_core::runtime::scroll::{ScrollInputHandle, ScrollRuntime};
 use openlogi_agent_core::runtime::{ActionDispatcher, ActionRequest, ActionRuntime};
+use openlogi_agent_core::switcher::ObservableSwitcher;
 use openlogi_agent_core::watchers::shutdown::{StopOutcome, WatcherHandle};
 use openlogi_agent_core::watchers::{self, gesture::GestureOutputs};
 use openlogi_core::config::Config;
@@ -64,7 +65,7 @@ pub(crate) async fn bootstrap(config: Config) -> Option<Core> {
         .await
         .attach_app_usage(openlogi_agent_core::app_usage::AppUsageStore::open_default());
     let shared = orchestrator.lock().await.shared();
-    let inputs = InputServices::start(&shared)?;
+    let inputs = InputServices::start(&shared, Arc::clone(&observable))?;
     let backlight_overlay = BacklightOverlayManager::default();
 
     // Shared between the hook callback (which mirrors events into it) and
@@ -138,7 +139,7 @@ pub(crate) struct InputServices {
 }
 
 impl InputServices {
-    fn start(shared: &SharedHandles) -> Option<Self> {
+    fn start(shared: &SharedHandles, observable: Arc<ObservableState>) -> Option<Self> {
         let ring = Arc::new(ActionRingManager::default());
         let (sender, triggers) = tokio::sync::mpsc::unbounded_channel();
         let action_runtime = match ActionRuntime::new(
@@ -146,6 +147,7 @@ impl InputServices {
             shared.pointer_speeds(),
             shared.device_access(),
             sender,
+            Arc::new(ObservableSwitcher::new(observable)),
         ) {
             Ok(runtime) => runtime,
             Err(e) => {

@@ -269,10 +269,11 @@ impl CaptureAccum {
         }
         // A streaming button reports its travel as it comes and never swipes.
         if self.streaming.contains(button) {
-            if dx != 0 {
+            if dx != 0 || dy != 0 {
                 let _ = sink.send(CapturedInput::HeldMotion {
                     button: *button,
                     dx,
+                    dy,
                 });
             }
             return;

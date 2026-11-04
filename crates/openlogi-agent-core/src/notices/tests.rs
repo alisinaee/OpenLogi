@@ -328,3 +328,28 @@ fn optimistic_desktop_reports_reuse_the_last_schema() {
         "a map of another size is not reused"
     );
 }
+
+#[test]
+fn the_app_switcher_replaces_a_desktop_switch_and_ends_with_its_press() {
+    let board = NoticeBoard::default();
+    board.post_desktop_switch(4, 1, None, None);
+    board.post_app_switcher(openlogi_core::switcher_rows::SwitcherView::default(), None);
+    let shown = |board: &NoticeBoard| {
+        board
+            .published
+            .borrow()
+            .notices
+            .iter()
+            .map(|n| matches!(n.kind, NoticeKind::AppSwitcher { .. }))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(shown(&board), [true], "the newer switcher takes the place");
+    board.post_app_switcher(openlogi_core::switcher_rows::SwitcherView::default(), None);
+    assert_eq!(
+        shown(&board),
+        [true],
+        "a newer app switcher replaces the older one"
+    );
+    board.end_app_switcher();
+    assert!(board.published.borrow().notices.is_empty());
+}

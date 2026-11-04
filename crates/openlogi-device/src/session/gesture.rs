@@ -93,14 +93,16 @@ pub enum CapturedInput {
     /// An instantaneous firmware-reported tap with no observable hold
     /// duration, such as the thumb-wheel touch sensor.
     ButtonPulse(ButtonId),
-    /// Horizontal mouse travel while a motion-streaming button is held (see
+    /// Mouse travel while a motion-streaming button is held (see
     /// [`CaptureSpec::motion_buttons`]). The firmware reports it over `0x1b04`
-    /// raw XY instead of moving the pointer; vertical travel is dropped here.
+    /// raw XY instead of moving the pointer.
     HeldMotion {
         /// The held button the travel belongs to.
         button: ButtonId,
         /// Horizontal travel in sensor counts; positive is rightward.
         dx: i16,
+        /// Vertical travel in sensor counts; positive is downward.
+        dy: i16,
     },
     /// Main-wheel movement while a wheel-hold button is held. The firmware
     /// reports it over `0x1b04` instead of scrolling, so the agent can scroll
