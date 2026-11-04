@@ -2,10 +2,10 @@
 //! native switcher by moving the mouse sideways.
 //!
 //! This module is the single owner of every decision the feature makes: the
-//! default hold time and step distance, the accepted range of each, the
-//! chords it types, the safety limit on a hold, and the rule that turns
-//! horizontal travel into switcher steps. The agent applies them; none of its
-//! crates restates a number or a chord.
+//! default hold time and step distance, the accepted range of each, the chord
+//! a tap types, the safety limit on a hold, and the rule that turns horizontal
+//! travel into switcher steps. The agent applies them; none of its crates
+//! restates a number or a chord.
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -16,18 +16,10 @@ use super::action::Action;
 use super::key_combo::KeyCombo;
 use super::value::{HoldThreshold, LongPressBinding};
 
-/// How long a hold may last before the agent lets go of the switcher modifier
-/// on its own. The switcher keeps its modifier down for as long as the button
-/// is held, so a release that never arrives (the mouse went out of range
-/// mid-hold) must not leave that modifier stuck.
+/// How long a hold may last before the agent takes its rows down on its own.
+/// The rows stay up for as long as the button is held, so a release that never
+/// arrives (the mouse went out of range mid-hold) must not leave them on screen.
 pub const APP_SWITCHER_HOLD_LIMIT: Duration = Duration::from_secs(10);
-
-/// The least time the switcher modifier stays down after the last key the hold
-/// typed (the opening Tab or a step). The native switcher handles keys
-/// asynchronously: a modifier release that follows the last Tab within a
-/// millisecond can be handled first, so the switcher activates the app one
-/// step short, or not the highlighted one at all.
-pub const APP_SWITCHER_SETTLE: Duration = Duration::from_millis(60);
 
 /// The hold time of a binding that sets none, in milliseconds.
 const DEFAULT_HOLD_MS: u16 = 250;
@@ -99,9 +91,9 @@ pub enum SwitchDirection {
     Backward,
 }
 
-/// The chord that moves the switcher one app in `direction`, modifiers
-/// included. [`Forward`](SwitchDirection::Forward) is also the chord that
-/// opens it and the chord of a plain tap. It is Cmd+Tab on macOS, where the
+/// The chord that moves the native switcher one app in `direction`, modifiers
+/// included. [`Forward`](SwitchDirection::Forward) is the chord of a plain tap,
+/// which switches to the previous app. It is Cmd+Tab on macOS, where the
 /// feature is supported, and Alt+Tab elsewhere.
 #[must_use]
 pub fn switcher_chord(direction: SwitchDirection) -> &'static KeyCombo {
@@ -111,20 +103,6 @@ pub fn switcher_chord(direction: SwitchDirection) -> &'static KeyCombo {
         SwitchDirection::Forward => &FORWARD,
         SwitchDirection::Backward => &BACKWARD,
     }
-}
-
-/// The chord that dismisses the open switcher without activating anything:
-/// Escape with the switcher modifier still down.
-#[must_use]
-pub fn switcher_cancel_chord() -> &'static KeyCombo {
-    static CANCEL: LazyLock<KeyCombo> = LazyLock::new(|| {
-        parse_chord(if cfg!(target_os = "macos") {
-            "Cmd+Escape"
-        } else {
-            "Alt+Escape"
-        })
-    });
-    &CANCEL
 }
 
 const fn base_chord() -> &'static str {
@@ -195,12 +173,6 @@ impl AppSwitcherParams {
     pub fn long_press(self) -> LongPressBinding {
         let tap = Action::CustomShortcut(switcher_chord(SwitchDirection::Forward).clone());
         LongPressBinding::new(tap, Action::AppSwitcher).with_hold(self.hold_threshold())
-    }
-
-    /// A fresh [`SwitchStepper`] for one hold of this binding.
-    #[must_use]
-    pub fn stepper(self) -> SwitchStepper {
-        SwitchStepper::new(self.step())
     }
 }
 

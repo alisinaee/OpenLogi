@@ -33,8 +33,8 @@ pub use action_ring::{
     RingAction, RingActionError,
 };
 pub use app_switcher::{
-    APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, AppSwitcherBinding, AppSwitcherParams, StepPx,
-    SwitchDirection, SwitchRun, SwitchStepper, switcher_cancel_chord, switcher_chord,
+    APP_SWITCHER_HOLD_LIMIT, AppSwitcherBinding, AppSwitcherParams, StepPx, SwitchDirection,
+    SwitchRun, SwitchStepper, switcher_chord,
 };
 pub use application_target::{ApplicationTarget, ApplicationTargetError};
 pub use button::{ButtonId, GridKey, GridSlot, KeypadPage, ParseButtonIdError};

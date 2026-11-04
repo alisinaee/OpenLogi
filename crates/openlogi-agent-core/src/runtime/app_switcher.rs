@@ -1,32 +1,33 @@
 //! The hold half of the app switcher button.
 //!
 //! A tap is an ordinary short action. A hold past the binding's threshold
-//! presses and keeps the switcher modifier down so the native switcher stays
-//! open, and steps it as the mouse moves sideways. The modifier is owned by
-//! [`SwitcherHold`] and released exactly once, by whichever comes first: the
-//! press ending (release, cancellation, shutdown), or the safety limit,
-//! so a release that never arrives cannot leave it stuck.
+//! opens the switcher's rows, which the agent's own overlay draws, and the
+//! selection follows the mouse sideways. The native switcher is never touched
+//! during a hold: no modifier is held and no chord is typed. Releasing the
+//! press takes the rows down and activates the entry the cursor was on, if
+//! any. A hold that never moved draws nothing and activates nothing.
+//!
+//! The rows are owned by [`ActiveHold`] and taken down exactly once, by
+//! whichever comes first: the press ending, or the safety limit, so a release
+//! that never arrives cannot leave them on screen.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use openlogi_core::binding::{
-    APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, Action, AppSwitcherParams, HeldKeys, StepPx,
-    SwitchDirection, SwitchStepper, switcher_cancel_chord, switcher_chord,
-};
+use openlogi_core::binding::{APP_SWITCHER_HOLD_LIMIT, AppSwitcherParams, StepPx};
 use openlogi_core::switcher_rows::SwitcherSelection;
 use tracing::{debug, warn};
 
 use super::PressToken;
-use crate::switcher::{NoSwitcherOverlay, SwitcherPort, SwitcherTarget};
+use crate::switcher::{SwitcherPort, SwitcherTarget};
 
 /// The rows a hold draws once the mouse has moved: the port that shows them,
 /// the step the travel counts in, and the selection, opened on the first
 /// travel so a hold that never moves never reads the windows.
-pub(super) struct Overlay {
+struct Overlay {
     port: Arc<dyn SwitcherPort>,
     step: StepPx,
     selection: Option<SwitcherSelection>,
@@ -63,162 +64,49 @@ impl Overlay {
         self.selection.as_ref()?.selection().map(SwitcherTarget::of)
     }
 
-    /// The press ended: take the rows down, if any were shown.
+    /// The press ended: take the rows down, then bring the entry the cursor
+    /// was on to the front.
     fn end(self) {
+        let target = self.target();
         if self.selection.is_some() {
             self.port.hide();
         }
-    }
-}
-
-/// The keys a hold drives. Dropping the value releases the modifier it holds,
-/// so its owner can never forget to.
-pub(super) trait SwitcherKeys: Send + 'static {
-    /// Type one switcher step with the modifier still down.
-    fn step(&mut self, direction: SwitchDirection);
-
-    /// Dismiss the open switcher so letting go of the modifier activates
-    /// nothing.
-    fn cancel(&mut self);
-}
-
-/// The real keyboard: the modifier is a held chord, and each step a chord of
-/// its own so the modifier stays down throughout.
-pub(super) struct SystemKeys {
-    _held: openlogi_inject::HeldChord,
-}
-
-impl SystemKeys {
-    /// Press the modifier and tap Tab once, which opens the switcher.
-    pub(super) fn open() -> Self {
-        Self {
-            _held: openlogi_inject::press_hold(
-                switcher_chord(SwitchDirection::Forward),
-                HeldKeys::ModifiersOnly,
-            ),
+        if let Some(target) = target {
+            self.port.activate(&target);
         }
     }
 }
 
-impl SwitcherKeys for SystemKeys {
-    fn step(&mut self, direction: SwitchDirection) {
-        openlogi_inject::execute(&Action::CustomShortcut(switcher_chord(direction).clone()));
-    }
-
-    fn cancel(&mut self) {
-        openlogi_inject::execute(&Action::CustomShortcut(switcher_cancel_chord().clone()));
-    }
+/// End the rows in `slot` once. Returns whether there were rows to end.
+fn end_rows(slot: &Mutex<Option<Overlay>>) -> bool {
+    let overlay = lock(slot).take();
+    let Some(overlay) = overlay else {
+        return false;
+    };
+    overlay.end();
+    true
 }
 
-/// One open switcher: the held keys, and the stepper that turns the mouse's
-/// travel into taps on them.
-struct SwitcherHold<K: SwitcherKeys> {
-    keys: Option<K>,
-    stepper: SwitchStepper,
-    /// Whether the hold has stepped the switcher at all. A hold that never did
-    /// is cancelled on release: only a quick tap switches app without motion.
-    stepped: bool,
-    /// When the hold last typed a key, and how long the modifier must outlast it.
-    last_key: Instant,
-    settle: Duration,
-    /// The rows drawn beside the native switcher, when the hold has a host for them.
-    overlay: Option<Overlay>,
-}
-
-impl<K: SwitcherKeys> SwitcherHold<K> {
-    fn motion(&mut self, dx: i16, dy: i16) {
-        let Some(keys) = self.keys.as_mut() else {
-            return;
-        };
-        if let Some(overlay) = self.overlay.as_mut() {
-            overlay.motion(dx, dy);
-        }
-        if let Some(run) = self.stepper.motion(dx) {
-            debug!(?run, "app switcher step");
-            for _ in 0..run.count {
-                keys.step(run.direction);
-            }
-            self.stepped = true;
-            self.last_key = Instant::now();
-        }
-    }
-
-    /// Let go of the modifier. Idempotent.
-    ///
-    /// The modifier outlasts the last typed key by the settle time, so the
-    /// native switcher has handled that key before it sees the release.
-    fn release(&mut self) -> bool {
-        let overlay = self.overlay.take();
-        let target = overlay.as_ref().and_then(Overlay::target);
-        let port = overlay.as_ref().map(|overlay| Arc::clone(&overlay.port));
-        if let Some(overlay) = overlay {
-            overlay.end();
-        }
-        let Some(keys) = self.keys.as_mut() else {
-            return false;
-        };
-        // Choosing an entry dismisses the native switcher too, so its own
-        // highlight never activates an app instead of the one chosen here.
-        if !self.stepped || target.is_some() {
-            debug!(chosen = target.is_some(), "app switcher dismissed");
-            keys.cancel();
-            self.last_key = Instant::now();
-        }
-        let wait = self.settle.saturating_sub(self.last_key.elapsed());
-        if !wait.is_zero() {
-            thread::sleep(wait);
-        }
-        debug!(?wait, "app switcher modifier released");
-        let released = self.keys.take().is_some();
-        if let (true, Some(port), Some(target)) = (released, port, target) {
-            port.activate(&target);
-        }
-        released
-    }
-}
-
-/// A [`SwitcherHold`] plus the watchdog that releases it when the press never
-/// ends. Dropping it releases the hold and retires the watchdog.
-pub(super) struct ActiveHold<K: SwitcherKeys> {
-    hold: Arc<Mutex<SwitcherHold<K>>>,
+/// One open switcher: the rows, and the watchdog that ends them when the press
+/// never does. Dropping it ends the rows and retires the watchdog.
+pub(super) struct ActiveHold {
+    rows: Arc<Mutex<Option<Overlay>>>,
     /// The watchdog waits on the other end; dropping this wakes it to exit.
     _retire_watchdog: mpsc::Sender<()>,
 }
 
-impl<K: SwitcherKeys> ActiveHold<K> {
-    pub(super) fn start(
-        keys: K,
-        stepper: SwitchStepper,
-        limit: Duration,
-        overlay: Option<Overlay>,
-    ) -> Self {
-        Self::start_settling(keys, stepper, limit, APP_SWITCHER_SETTLE, overlay)
-    }
-
-    fn start_settling(
-        keys: K,
-        stepper: SwitchStepper,
-        limit: Duration,
-        settle: Duration,
-        overlay: Option<Overlay>,
-    ) -> Self {
-        let hold = Arc::new(Mutex::new(SwitcherHold {
-            keys: Some(keys),
-            stepper,
-            stepped: false,
-            last_key: Instant::now(),
-            settle,
-            overlay,
-        }));
+impl ActiveHold {
+    fn start(overlay: Overlay, limit: Duration) -> Self {
+        let rows = Arc::new(Mutex::new(Some(overlay)));
         let (retire, retired) = mpsc::channel::<()>();
-        let watched = Arc::clone(&hold);
+        let watched = Arc::clone(&rows);
         let spawned = thread::Builder::new()
             .name("openlogi-switcher-watchdog".into())
             .spawn(move || {
                 if retired.recv_timeout(limit) == Err(RecvTimeoutError::Timeout)
-                    && lock(&watched).release()
+                    && end_rows(&watched)
                 {
-                    warn!(?limit, "app switcher hold never ended — modifier released");
+                    warn!(?limit, "app switcher hold never ended — rows taken down");
                 }
             });
         if let Err(error) = spawned {
@@ -226,79 +114,59 @@ impl<K: SwitcherKeys> ActiveHold<K> {
             warn!(%error, "could not start the app switcher watchdog");
         }
         Self {
-            hold,
+            rows,
             _retire_watchdog: retire,
         }
     }
 
     fn motion(&self, dx: i16, dy: i16) {
-        lock(&self.hold).motion(dx, dy);
+        if let Some(overlay) = lock(&self.rows).as_mut() {
+            overlay.motion(dx, dy);
+        }
     }
 }
 
-impl<K: SwitcherKeys> Drop for ActiveHold<K> {
+impl Drop for ActiveHold {
     fn drop(&mut self) {
-        lock(&self.hold).release();
+        end_rows(&self.rows);
     }
 }
 
-fn lock<K: SwitcherKeys>(
-    hold: &Mutex<SwitcherHold<K>>,
-) -> std::sync::MutexGuard<'_, SwitcherHold<K>> {
-    // The guarded state is a stepper and an `Option`; a panic elsewhere
-    // leaves both consistent, and the release must still happen.
-    hold.lock().unwrap_or_else(PoisonError::into_inner)
+fn lock(rows: &Mutex<Option<Overlay>>) -> std::sync::MutexGuard<'_, Option<Overlay>> {
+    // The guarded state is an `Option` of plain data; a panic elsewhere
+    // leaves it consistent, and the rows must still come down.
+    rows.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The open switchers, one per press that started one. The press token is the
-/// only key: ending, cancelling or invalidating a press removes its entry and
-/// so releases its modifier.
-pub(super) struct HeldAppSwitchers<K: SwitcherKeys = SystemKeys> {
-    by_press: HashMap<PressToken, ActiveHold<K>>,
+/// only key: ending or invalidating a press removes its entry and so takes its
+/// rows down.
+pub(super) struct HeldAppSwitchers {
+    by_press: HashMap<PressToken, ActiveHold>,
     /// Where the rows of an open switcher are drawn and listed.
     port: Arc<dyn SwitcherPort>,
 }
 
-impl<K: SwitcherKeys> Default for HeldAppSwitchers<K> {
-    fn default() -> Self {
-        Self::new(Arc::new(NoSwitcherOverlay))
-    }
-}
-
-impl<K: SwitcherKeys> HeldAppSwitchers<K> {
+impl HeldAppSwitchers {
     pub(super) fn new(port: Arc<dyn SwitcherPort>) -> Self {
         Self {
             by_press: HashMap::new(),
             port,
         }
     }
-}
 
-impl HeldAppSwitchers<SystemKeys> {
     /// Open the switcher for `press` and follow its mouse travel from here.
     pub(super) fn start(&mut self, press: &PressToken, params: AppSwitcherParams) {
         let overlay = Overlay::new(Arc::clone(&self.port), params.step());
-        self.start_with(press, params.stepper(), SystemKeys::open(), Some(overlay));
-    }
-}
-
-impl<K: SwitcherKeys> HeldAppSwitchers<K> {
-    fn start_with(
-        &mut self,
-        press: &PressToken,
-        stepper: SwitchStepper,
-        keys: K,
-        overlay: Option<Overlay>,
-    ) {
-        // A second start for one press replaces the first, which releases its
-        // modifier as it drops; the new hold presses its own.
+        // A second start for one press replaces the first, which takes its
+        // rows down as it drops.
         self.by_press.insert(
             press.clone(),
-            ActiveHold::start(keys, stepper, APP_SWITCHER_HOLD_LIMIT, overlay),
+            ActiveHold::start(overlay, APP_SWITCHER_HOLD_LIMIT),
         );
     }
 
-    /// Travel before the hold opened, or after it ended, steps nothing.
+    /// Travel before the hold opened, or after it ended, moves nothing.
     pub(super) fn motion(&self, press: &PressToken, dx: i16, dy: i16) {
         if let Some(hold) = self.by_press.get(press) {
             hold.motion(dx, dy);
@@ -307,8 +175,8 @@ impl<K: SwitcherKeys> HeldAppSwitchers<K> {
         }
     }
 
-    /// The press ended: release the modifier so the native switcher activates
-    /// the highlighted app.
+    /// The press ended: take the rows down and activate the entry the cursor
+    /// was on, if any.
     pub(super) fn end(&mut self, press: &PressToken) {
         self.by_press.remove(press);
     }
