@@ -42,7 +42,6 @@ use openlogi_core::config::{
 use openlogi_core::desktop_schema::{
     DesktopSchema, SchemaApp, SchemaWindow, SpaceSchema, UnitRect,
 };
-use openlogi_core::switcher_rows::{SwitcherRow, SwitcherRows, SwitcherView, SwitcherWindow};
 use openlogi_core::device::{
     BatteryInfo, BatteryLevel, BatteryStatus, Capabilities, ChangedOnLight, DeviceInventory,
     DeviceKind, DeviceModelInfo, DeviceTransports, LightCapabilities, LightState, LightValueRange,
@@ -57,6 +56,7 @@ use openlogi_core::hid::{
     ReportRateInfo, ScrollReportingTarget, ScrollWheelMode, SidetoneLevel, SmartShiftAutoDisengage,
     SmartShiftMode, SmartShiftStatus, SmartShiftThreshold, TunableTorque, WriteError,
 };
+use openlogi_core::switcher_rows::{SwitcherRow, SwitcherRows, SwitcherView, SwitcherWindow};
 use openlogi_ipc::{
     ActionRingCommandError, ActionRingInvocation, ActionRingPresentation, AgentRequest,
     AgentResponse, AgentSnapshot, AgentStatus, BacklightObservation, ChosenLight, ClientKind,
