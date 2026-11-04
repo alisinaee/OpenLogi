@@ -159,6 +159,9 @@ optional physical device key.
   so it needs no Screen Recording permission. If the windows cannot be read in
   time the boxes stay plain numbers. Needs `show_desktop_switcher`; there is no
   toggle in the GUI yet, so edit the file.
+- `desktop_switcher_size` (default `"medium"`, macOS only): how large the
+  desktop switcher is drawn: `"small"` (0.8x), `"medium"` (1x) or `"large"`
+  (1.3x). Applies from the next switch.
 
 `[devices."<physical-key>"]` contains per-device state. Receiver keys look like
 `receiver:<receiver-id>:slot:<number>`; direct, raw-HID, and camera devices use

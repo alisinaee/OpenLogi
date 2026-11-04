@@ -277,6 +277,11 @@ const APP: &[Spec] = &[
         Kind::Bool,
         "Map each desktop in the switcher: window outlines and app icons; needs show_desktop_switcher (macOS).",
     ),
+    choice(
+        "desktop_switcher_size",
+        &["small", "medium", "large"],
+        "How large the desktop switcher is drawn (macOS).",
+    ),
     spec(
         "scroll_acceleration",
         Kind::Bool,

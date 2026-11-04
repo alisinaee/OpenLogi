@@ -1,6 +1,7 @@
 //! The `[app]` block: defaults, opt-ins, scale, gallery layout and asset source.
 
 use super::*;
+use crate::config::DesktopSwitcherSize;
 use crate::update_feed::UpdateChannel;
 
 #[test]
@@ -213,6 +214,52 @@ fn desktop_switches_slide_unless_turned_off() {
     let mut cfg = Config::default();
     cfg.app_settings.animate_desktop_switch = false;
     assert!(!write_and_read(&cfg).app_settings.animate_desktop_switch);
+}
+
+#[test]
+fn desktop_switcher_size_defaults_medium_and_is_left_out_of_the_file() {
+    assert_eq!(
+        Config::default().app_settings.desktop_switcher_size,
+        DesktopSwitcherSize::Medium
+    );
+    let predating: Config = toml::from_str(
+        r"
+            schema_version = 9
+            [app_settings]
+            show_desktop_switcher = false
+        ",
+    )
+    .expect("config predating the desktop switcher size loads");
+    assert_eq!(
+        predating.app_settings.desktop_switcher_size,
+        DesktopSwitcherSize::Medium
+    );
+
+    let mut cfg = Config::default();
+    assert!(
+        !toml::to_string(&cfg)
+            .unwrap()
+            .contains("desktop_switcher_size")
+    );
+    cfg.app_settings.desktop_switcher_size = DesktopSwitcherSize::Large;
+    let written = toml::to_string(&cfg).unwrap();
+    assert!(
+        written.contains("desktop_switcher_size = \"large\""),
+        "{written}"
+    );
+    assert_eq!(
+        write_and_read(&cfg).app_settings.desktop_switcher_size,
+        DesktopSwitcherSize::Large
+    );
+}
+
+#[test]
+fn desktop_switcher_size_scales_small_medium_and_large() {
+    let scales: Vec<f32> = DesktopSwitcherSize::ALL
+        .iter()
+        .map(|size| size.scale())
+        .collect();
+    assert_eq!(scales, [0.8, 1.0, 1.3]);
 }
 
 #[test]

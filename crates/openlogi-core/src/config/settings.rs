@@ -351,10 +351,52 @@ pub struct AppSettings {
     /// The curve a smoothed wheel step follows. Defaults to `smooth`.
     #[serde(default)]
     pub smooth_wheel_easing: WheelEasing,
+    /// How large the desktop switcher is drawn. **Medium by default.** Only
+    /// macOS reads it.
+    #[serde(default, skip_serializing_if = "DesktopSwitcherSize::is_default")]
+    pub desktop_switcher_size: DesktopSwitcherSize,
 }
 
 const fn default_smooth_wheel_duration_ms() -> u16 {
     WheelFeel::DURATION_MS_DEFAULT
+}
+
+/// How large the desktop switcher is drawn: the factor every one of its
+/// dimensions is scaled by. Append-only: it rides the IPC wire inside
+/// [`AppSettings`] and the desktop switch notice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopSwitcherSize {
+    /// Four fifths of the standard size.
+    Small,
+    /// The standard size.
+    #[default]
+    Medium,
+    /// Thirteen tenths of the standard size.
+    Large,
+}
+
+impl DesktopSwitcherSize {
+    /// Every size, in the order Settings offers them.
+    pub const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+
+    /// The factor the overlay scales the switcher by. The one place this
+    /// mapping lives.
+    #[must_use]
+    pub const fn scale(self) -> f32 {
+        match self {
+            Self::Small => 0.8,
+            Self::Medium => 1.0,
+            Self::Large => 1.3,
+        }
+    }
+
+    /// `skip_serializing_if` helper: the default size is left out of
+    /// `config.toml`.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The curve one smoothed wheel step follows from its start to its target.
@@ -645,6 +687,7 @@ impl Default for AppSettings {
             scroll_acceleration: true,
             smooth_wheel_duration_ms: WheelFeel::DURATION_MS_DEFAULT,
             smooth_wheel_easing: WheelEasing::Smooth,
+            desktop_switcher_size: DesktopSwitcherSize::default(),
             desktop_switcher_show_apps: true,
             pinned_apps: Vec::new(),
         }
