@@ -15,6 +15,11 @@ use openlogi_core::binding::{
 
 use super::{HeldKey, HeldModifiers, KeyPhase};
 
+#[expect(
+    unsafe_code,
+    reason = "AX window raise uses the private _AXUIElementGetWindow symbol, resolved via dlsym"
+)]
+mod app_focus;
 /// Shared resolver for private ApplicationServices and SkyLight SPI.
 #[expect(
     unsafe_code,
@@ -81,6 +86,7 @@ mod symbolic_hotkey;
 mod tests;
 mod virtual_keyboard;
 
+pub(super) use app_focus::{activate_app, focus_window};
 use app_services::symbol as app_services_symbol;
 pub(super) use browser::ax_browser_navigate;
 use dock::{app_expose, launchpad, mission_control, show_desktop};
@@ -91,7 +97,7 @@ use menu_shortcut::{MenuPress, MenuShortcut};
 use scroll::dispatch_scroll;
 pub(super) use scroll::{post_phased_scroll, post_scroll, post_smooth_scroll};
 pub(super) use spaces::{
-    natural_scrolling, set_desktop_observer, set_desktop_schema, set_desktop_switch,
+    natural_scrolling, open_windows, set_desktop_observer, set_desktop_schema, set_desktop_switch,
 };
 use spaces::{next_desktop, previous_desktop};
 use symbolic_hotkey::{capture_region, screenshot};

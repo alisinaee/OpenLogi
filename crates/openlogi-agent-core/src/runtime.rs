@@ -31,6 +31,7 @@ use crate::hardware::{
     toggle_smartshift_in_background, write_pointer_speed_in_background,
 };
 use crate::pointer_speed::{PrecisionPress, Restore, ShiftRestore, SpeedPlace, SpeedWrite};
+use crate::switcher::SwitcherPort;
 use crate::{DpiCycleState, DpiCycles, PointerSpeeds};
 use openlogi_hid::{DeviceRoute, Dpi};
 
@@ -620,12 +621,12 @@ struct ButtonEventHandler {
 }
 
 impl ButtonEventHandler {
-    fn new(executor: ActionExecutor) -> Self {
+    fn new(executor: ActionExecutor, switcher: Arc<dyn SwitcherPort>) -> Self {
         Self {
             executor,
             held: HeldShortcuts::default(),
             held_dpi: HeldDpiShifts::default(),
-            switchers: HeldAppSwitchers::default(),
+            switchers: HeldAppSwitchers::new(switcher),
         }
     }
 
@@ -645,8 +646,8 @@ impl ButtonEventHandler {
                 }
                 self.start_action(&press, &action);
             }
-            ButtonRuntimeEvent::Motion { press, dx } => {
-                self.switchers.motion(press.token(), dx);
+            ButtonRuntimeEvent::Motion { press, dx, dy } => {
+                self.switchers.motion(press.token(), dx, dy);
             }
             ButtonRuntimeEvent::Ended { press, reason } => {
                 self.held.end(press.token());
@@ -717,6 +718,7 @@ impl ActionRuntime {
         pointer_speeds: Arc<PointerSpeeds>,
         access: DeviceAccess,
         requests: tokio::sync::mpsc::UnboundedSender<ActionRequest>,
+        switcher: Arc<dyn SwitcherPort>,
     ) -> io::Result<Self> {
         let executor = ActionExecutor {
             dpi_cycle,
@@ -724,7 +726,7 @@ impl ActionRuntime {
             access,
             requests,
         };
-        let mut button_handler = ButtonEventHandler::new(executor.clone());
+        let mut button_handler = ButtonEventHandler::new(executor.clone(), switcher);
         let buttons = ButtonRuntimeOwner::spawn(move |event| button_handler.handle(event))?;
         let input = buttons.input();
         Ok(Self {
@@ -814,8 +816,8 @@ impl ActionDispatcher {
 
     /// Report `dx` counts of sideways mouse travel while `press` is down,
     /// which steps an open app switcher. Lossy by design.
-    pub(crate) fn try_motion_while_pressed(&self, press: &PressToken, dx: i16) -> bool {
-        self.buttons.try_motion_while_pressed(press, dx)
+    pub(crate) fn try_motion_while_pressed(&self, press: &PressToken, dx: i16, dy: i16) -> bool {
+        self.buttons.try_motion_while_pressed(press, dx, dy)
     }
 
     /// Record that the wheel moved while `press` was down, so a wheel-hold

@@ -14,12 +14,62 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use openlogi_core::binding::{
-    APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, Action, AppSwitcherParams, HeldKeys,
+    APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, Action, AppSwitcherParams, HeldKeys, StepPx,
     SwitchDirection, SwitchStepper, switcher_cancel_chord, switcher_chord,
 };
+use openlogi_core::switcher_rows::SwitcherSelection;
 use tracing::{debug, warn};
 
 use super::PressToken;
+use crate::switcher::{NoSwitcherOverlay, SwitcherPort, SwitcherTarget};
+
+/// The rows a hold draws once the mouse has moved: the port that shows them,
+/// the step the travel counts in, and the selection, opened on the first
+/// travel so a hold that never moves never reads the windows.
+pub(super) struct Overlay {
+    port: Arc<dyn SwitcherPort>,
+    step: StepPx,
+    selection: Option<SwitcherSelection>,
+}
+
+impl Overlay {
+    fn new(port: Arc<dyn SwitcherPort>, step: StepPx) -> Self {
+        Self {
+            port,
+            step,
+            selection: None,
+        }
+    }
+
+    /// Account for one mouse report, and show the rows when they opened or
+    /// the selection moved.
+    fn motion(&mut self, dx: i16, dy: i16) {
+        let Self {
+            port,
+            step,
+            selection,
+        } = self;
+        let opened = selection.is_none();
+        let selection =
+            selection.get_or_insert_with(|| SwitcherSelection::open(port.snapshot(), 1, *step));
+        let moved = selection.motion(dx, dy);
+        if opened || moved {
+            port.show(selection.view());
+        }
+    }
+
+    /// The entry the cursor is on, if the rows are open and it is on one.
+    fn target(&self) -> Option<SwitcherTarget> {
+        self.selection.as_ref()?.selection().map(SwitcherTarget::of)
+    }
+
+    /// The press ended: take the rows down, if any were shown.
+    fn end(self) {
+        if self.selection.is_some() {
+            self.port.hide();
+        }
+    }
+}
 
 /// The keys a hold drives. Dropping the value releases the modifier it holds,
 /// so its owner can never forget to.
@@ -71,13 +121,18 @@ struct SwitcherHold<K: SwitcherKeys> {
     /// When the hold last typed a key, and how long the modifier must outlast it.
     last_key: Instant,
     settle: Duration,
+    /// The rows drawn beside the native switcher, when the hold has a host for them.
+    overlay: Option<Overlay>,
 }
 
 impl<K: SwitcherKeys> SwitcherHold<K> {
-    fn motion(&mut self, dx: i16) {
+    fn motion(&mut self, dx: i16, dy: i16) {
         let Some(keys) = self.keys.as_mut() else {
             return;
         };
+        if let Some(overlay) = self.overlay.as_mut() {
+            overlay.motion(dx, dy);
+        }
         if let Some(run) = self.stepper.motion(dx) {
             debug!(?run, "app switcher step");
             for _ in 0..run.count {
@@ -93,11 +148,19 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
     /// The modifier outlasts the last typed key by the settle time, so the
     /// native switcher has handled that key before it sees the release.
     fn release(&mut self) -> bool {
+        let overlay = self.overlay.take();
+        let target = overlay.as_ref().and_then(Overlay::target);
+        let port = overlay.as_ref().map(|overlay| Arc::clone(&overlay.port));
+        if let Some(overlay) = overlay {
+            overlay.end();
+        }
         let Some(keys) = self.keys.as_mut() else {
             return false;
         };
-        if !self.stepped {
-            debug!("app switcher hold without travel — cancelled");
+        // Choosing an entry dismisses the native switcher too, so its own
+        // highlight never activates an app instead of the one chosen here.
+        if !self.stepped || target.is_some() {
+            debug!(chosen = target.is_some(), "app switcher dismissed");
             keys.cancel();
             self.last_key = Instant::now();
         }
@@ -106,7 +169,11 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
             thread::sleep(wait);
         }
         debug!(?wait, "app switcher modifier released");
-        self.keys.take().is_some()
+        let released = self.keys.take().is_some();
+        if let (true, Some(port), Some(target)) = (released, port, target) {
+            port.activate(&target);
+        }
+        released
     }
 }
 
@@ -119,17 +186,29 @@ pub(super) struct ActiveHold<K: SwitcherKeys> {
 }
 
 impl<K: SwitcherKeys> ActiveHold<K> {
-    pub(super) fn start(keys: K, stepper: SwitchStepper, limit: Duration) -> Self {
-        Self::start_settling(keys, stepper, limit, APP_SWITCHER_SETTLE)
+    pub(super) fn start(
+        keys: K,
+        stepper: SwitchStepper,
+        limit: Duration,
+        overlay: Option<Overlay>,
+    ) -> Self {
+        Self::start_settling(keys, stepper, limit, APP_SWITCHER_SETTLE, overlay)
     }
 
-    fn start_settling(keys: K, stepper: SwitchStepper, limit: Duration, settle: Duration) -> Self {
+    fn start_settling(
+        keys: K,
+        stepper: SwitchStepper,
+        limit: Duration,
+        settle: Duration,
+        overlay: Option<Overlay>,
+    ) -> Self {
         let hold = Arc::new(Mutex::new(SwitcherHold {
             keys: Some(keys),
             stepper,
             stepped: false,
             last_key: Instant::now(),
             settle,
+            overlay,
         }));
         let (retire, retired) = mpsc::channel::<()>();
         let watched = Arc::clone(&hold);
@@ -152,8 +231,8 @@ impl<K: SwitcherKeys> ActiveHold<K> {
         }
     }
 
-    fn motion(&self, dx: i16) {
-        lock(&self.hold).motion(dx);
+    fn motion(&self, dx: i16, dy: i16) {
+        lock(&self.hold).motion(dx, dy);
     }
 }
 
@@ -176,12 +255,21 @@ fn lock<K: SwitcherKeys>(
 /// so releases its modifier.
 pub(super) struct HeldAppSwitchers<K: SwitcherKeys = SystemKeys> {
     by_press: HashMap<PressToken, ActiveHold<K>>,
+    /// Where the rows of an open switcher are drawn and listed.
+    port: Arc<dyn SwitcherPort>,
 }
 
 impl<K: SwitcherKeys> Default for HeldAppSwitchers<K> {
     fn default() -> Self {
+        Self::new(Arc::new(NoSwitcherOverlay))
+    }
+}
+
+impl<K: SwitcherKeys> HeldAppSwitchers<K> {
+    pub(super) fn new(port: Arc<dyn SwitcherPort>) -> Self {
         Self {
             by_press: HashMap::new(),
+            port,
         }
     }
 }
@@ -189,26 +277,33 @@ impl<K: SwitcherKeys> Default for HeldAppSwitchers<K> {
 impl HeldAppSwitchers<SystemKeys> {
     /// Open the switcher for `press` and follow its mouse travel from here.
     pub(super) fn start(&mut self, press: &PressToken, params: AppSwitcherParams) {
-        self.start_with(press, params.stepper(), SystemKeys::open());
+        let overlay = Overlay::new(Arc::clone(&self.port), params.step());
+        self.start_with(press, params.stepper(), SystemKeys::open(), Some(overlay));
     }
 }
 
 impl<K: SwitcherKeys> HeldAppSwitchers<K> {
-    fn start_with(&mut self, press: &PressToken, stepper: SwitchStepper, keys: K) {
+    fn start_with(
+        &mut self,
+        press: &PressToken,
+        stepper: SwitchStepper,
+        keys: K,
+        overlay: Option<Overlay>,
+    ) {
         // A second start for one press replaces the first, which releases its
         // modifier as it drops; the new hold presses its own.
         self.by_press.insert(
             press.clone(),
-            ActiveHold::start(keys, stepper, APP_SWITCHER_HOLD_LIMIT),
+            ActiveHold::start(keys, stepper, APP_SWITCHER_HOLD_LIMIT, overlay),
         );
     }
 
     /// Travel before the hold opened, or after it ended, steps nothing.
-    pub(super) fn motion(&self, press: &PressToken, dx: i16) {
+    pub(super) fn motion(&self, press: &PressToken, dx: i16, dy: i16) {
         if let Some(hold) = self.by_press.get(press) {
-            hold.motion(dx);
+            hold.motion(dx, dy);
         } else {
-            debug!(dx, "app switcher travel outside a hold — ignored");
+            debug!(dx, dy, "app switcher travel outside a hold — ignored");
         }
     }
 

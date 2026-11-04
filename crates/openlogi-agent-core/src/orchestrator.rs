@@ -2050,6 +2050,19 @@ impl Orchestrator {
     /// an earlier run.
     pub fn attach_app_usage(&mut self, store: crate::app_usage::AppUsageStore) {
         self.app_usage = store;
+        self.publish_switcher_inputs();
+    }
+
+    /// Give the app switcher what its rows are built from: the pinned apps,
+    /// the usage history, the app in front and the UI language.
+    fn publish_switcher_inputs(&self) {
+        self.observable
+            .set_switcher_inputs(crate::switcher::SwitcherInputs {
+                pinned: self.config.app_settings.pinned_apps.clone(),
+                usage: self.app_usage.usage().clone(),
+                frontmost: self.current_app.clone(),
+                language: self.config.app_settings.language.clone(),
+            });
     }
 
     /// The app switcher's Pinned, Recent and Most used rows, from the config's
@@ -2091,6 +2104,7 @@ impl Orchestrator {
             return false;
         }
         let previous = std::mem::replace(&mut self.current_app, id);
+        self.publish_switcher_inputs();
         self.publish_hook_maps(self.hook_maps_for(self.current_key()));
         // Capture plans are app-scoped (per-app binding overlays); republish
         // them with the keyboard's effective bindings.
@@ -2178,6 +2192,7 @@ impl Orchestrator {
     fn replace_config_from(&mut self, config: Config, source: ConfigSource<'_>) -> Vec<LightWrite> {
         let previous_lights = self.effective_online_lights();
         let previous = std::mem::replace(&mut self.config, config);
+        self.publish_switcher_inputs();
         self.forget_saved_light_changes(&previous, source);
         // Parameter-only edits must not erase a transient manual choice while
         // the light remains camera-linked. Changing the policy invalidates it.

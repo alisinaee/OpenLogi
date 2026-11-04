@@ -1025,3 +1025,9 @@ reading_sidetone = "Luetaan sivuääntä…"
 couldnt_read_sidetone_click_to_retry = "Sivuääntä ei voitu lukea. Yritä uudelleen napsauttamalla."
 device_offline_sidetone_is_unavailable = "Kuulokkeet eivät ole yhteydessä. Sivuääni ei ole käytettävissä."
 sidetone_unsupported = "Kuulokkeet eivät ilmoittaneet tukevansa säädettävää sivuääntä."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

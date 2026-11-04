@@ -19,6 +19,8 @@
 //! generation. The lock-key indicator has its own cell for the same reason,
 //! [`LockKeyIndicator`].
 
+use std::sync::{PoisonError, RwLock};
+
 use openlogi_core::app::ForegroundApp;
 use openlogi_core::brand::is_openlogi_foreground_id;
 use openlogi_core::device::{DeviceInventory, StandaloneDevice};
@@ -32,12 +34,14 @@ use tokio::sync::watch;
 
 use crate::lock_keys::LockKeyIndicator;
 use crate::notices::NoticeBoard;
+use crate::switcher::SwitcherInputs;
 
 /// The agent's observable state, and the notification that it changed.
 pub struct ObservableState {
     tx: watch::Sender<Observation>,
     notices: NoticeBoard,
     lock_keys: LockKeyIndicator,
+    switcher: RwLock<SwitcherInputs>,
 }
 
 impl ObservableState {
@@ -86,6 +90,7 @@ impl ObservableState {
             tx,
             notices: NoticeBoard::default(),
             lock_keys: LockKeyIndicator::default(),
+            switcher: RwLock::default(),
         }
     }
 
@@ -99,6 +104,19 @@ impl ObservableState {
     #[must_use]
     pub fn lock_keys(&self) -> &LockKeyIndicator {
         &self.lock_keys
+    }
+
+    /// Replace what the app switcher builds its rows from.
+    pub fn set_switcher_inputs(&self, inputs: SwitcherInputs) {
+        *self
+            .switcher
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = inputs;
+    }
+
+    /// Read what the app switcher builds its rows from, under the lock.
+    pub fn read_switcher<R>(&self, read: impl FnOnce(&SwitcherInputs) -> R) -> R {
+        read(&self.switcher.read().unwrap_or_else(PoisonError::into_inner))
     }
 
     /// Clone the whole current state.

@@ -1025,3 +1025,9 @@ reading_sidetone = "Чтение местного эффекта…"
 couldnt_read_sidetone_click_to_retry = "Не удалось прочитать местный эффект. Нажмите, чтобы повторить."
 device_offline_sidetone_is_unavailable = "Местный эффект недоступен, пока гарнитура не в сети."
 sidetone_unsupported = "Гарнитура не сообщает о поддержке регулируемого местного эффекта."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

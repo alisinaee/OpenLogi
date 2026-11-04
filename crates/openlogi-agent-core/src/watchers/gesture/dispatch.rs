@@ -271,13 +271,13 @@ impl InputDispatcher {
                 increments,
                 resolution,
             } => self.dispatch_wheel(session, plan, increments, resolution),
-            CapturedInput::HeldMotion { button, dx } => {
+            CapturedInput::HeldMotion { button, dx, dy } => {
                 let Some(press) = self.held_presses.get(session, button) else {
-                    debug!(key, %button, dx, "held motion from a canceled button lifecycle — ignored");
+                    debug!(key, %button, dx, dy, "held motion from a canceled button lifecycle — ignored");
                     return;
                 };
                 // Lossy: a full queue or an ended press simply drops it.
-                let _ = self.outputs.actions.try_motion_while_pressed(press, dx);
+                let _ = self.outputs.actions.try_motion_while_pressed(press, dx, dy);
             }
             CapturedInput::HeldWheel {
                 button,

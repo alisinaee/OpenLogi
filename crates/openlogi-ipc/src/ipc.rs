@@ -25,6 +25,7 @@ use openlogi_core::hid::{
     PasskeyMethod, PointerSpeed, ReceiverSelector, ReportRate, ReportRateInfo, ScrollWheelMode,
     SidetoneLevel, SmartShiftStatus, WriteError,
 };
+use openlogi_core::switcher_rows::SwitcherView;
 use serde::{Deserialize, Serialize};
 pub use succession::Identity;
 
@@ -182,7 +183,9 @@ pub use succession::Identity;
 ///      after Previous Desktop or Next Desktop on macOS, with its
 ///      `DesktopSchema` — the apps and window frames of each desktop.
 ///      `Action::AppSwitcher` and `Binding::AppSwitcher` appended — the app
-///      switcher button.
+///      switcher button. `NoticeKind::AppSwitcher` appended after it — the
+///      switcher's rows and selection while the button's mouse travel moves
+///      the cursor across them, as a [`SwitcherView`].
 pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the
@@ -886,6 +889,13 @@ pub enum NoticeKind {
         /// numbers: the user turned it off, or the windows could not be read
         /// in time.
         schema: Option<DesktopSchema>,
+    },
+    /// The app switcher, open while its button is held and the mouse has
+    /// moved: the rows and the cursor. A newer one replaces the one on show;
+    /// the agent removes it when the press ends.
+    AppSwitcher {
+        /// What the rows hold, and where the cursor is.
+        view: SwitcherView,
     },
 }
 

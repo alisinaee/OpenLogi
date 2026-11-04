@@ -1025,3 +1025,9 @@ reading_sidetone = "Yan ton okunuyor…"
 couldnt_read_sidetone_click_to_retry = "Yan ton okunamadı. Yeniden denemek için tıklayın."
 device_offline_sidetone_is_unavailable = "Kulaklık çevrimdışı olduğundan yan ton kullanılamıyor."
 sidetone_unsupported = "Bu kulaklık ayarlanabilir yan ton desteği bildirmiyor."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

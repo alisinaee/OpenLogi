@@ -40,7 +40,15 @@ pub(super) fn attr_bool(el: &AXUIElement, attr: &CFString) -> Option<bool> {
 /// `el`'s `AXChildren`, each retained on its own so it outlives the array,
 /// read lazily so a search stops at its first match.
 pub(super) fn children(el: &AXUIElement) -> impl Iterator<Item = CFRetained<AXUIElement>> {
-    copy_attr(el, &CFString::from_static_str("AXChildren"))
+    elements(el, "AXChildren")
+}
+
+/// The elements of the array attribute `attr` of `el`, each retained on its own.
+pub(super) fn elements(
+    el: &AXUIElement,
+    attr: &'static str,
+) -> impl Iterator<Item = CFRetained<AXUIElement>> {
+    copy_attr(el, &CFString::from_static_str(attr))
         .and_then(|value| value.downcast::<CFArray>().ok())
         .into_iter()
         .flat_map(|children| {

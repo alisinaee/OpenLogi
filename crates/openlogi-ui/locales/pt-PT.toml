@@ -1025,3 +1025,9 @@ reading_sidetone = "A ler o tom lateral…"
 couldnt_read_sidetone_click_to_retry = "Não foi possível ler o tom lateral. Clique para tentar novamente."
 device_offline_sidetone_is_unavailable = "O tom lateral está indisponível enquanto os auscultadores estiverem desligados."
 sidetone_unsupported = "Os auscultadores não indicam suporte para tom lateral ajustável."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

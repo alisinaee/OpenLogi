@@ -748,15 +748,22 @@ fn a_streaming_button_reports_travel_instead_of_swiping() {
             CapturedInput::ButtonDown(ButtonId::DpiToggle),
             CapturedInput::HeldMotion {
                 button: ButtonId::DpiToggle,
-                dx: 40
+                dx: 40,
+                dy: 900,
             },
             CapturedInput::HeldMotion {
                 button: ButtonId::DpiToggle,
-                dx: -25
+                dx: -25,
+                dy: 0,
+            },
+            CapturedInput::HeldMotion {
+                button: ButtonId::DpiToggle,
+                dx: 0,
+                dy: 300,
             },
             CapturedInput::ButtonUp(ButtonId::DpiToggle),
         ],
-        "no swipe, no click gesture, and purely vertical travel is dropped"
+        "no swipe and no click gesture: the travel streams, vertical included"
     );
 }
 

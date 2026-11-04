@@ -1025,3 +1025,9 @@ reading_sidetone = "Lecture de l'effet local…"
 couldnt_read_sidetone_click_to_retry = "Impossible de lire l'effet local. Cliquez pour réessayer."
 device_offline_sidetone_is_unavailable = "L'effet local est indisponible tant que le casque est hors ligne."
 sidetone_unsupported = "Ce casque n'indique pas prendre en charge le réglage de l'effet local."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

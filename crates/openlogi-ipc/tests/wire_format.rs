@@ -56,6 +56,7 @@ use openlogi_core::hid::{
     ReportRateInfo, ScrollReportingTarget, ScrollWheelMode, SidetoneLevel, SmartShiftAutoDisengage,
     SmartShiftMode, SmartShiftStatus, SmartShiftThreshold, TunableTorque, WriteError,
 };
+use openlogi_core::switcher_rows::{SwitcherRow, SwitcherRows, SwitcherView, SwitcherWindow};
 use openlogi_ipc::{
     ActionRingCommandError, ActionRingInvocation, ActionRingPresentation, AgentRequest,
     AgentResponse, AgentSnapshot, AgentStatus, BacklightObservation, ChosenLight, ClientKind,
@@ -494,6 +495,33 @@ fn notices() {
             language: None,
         },
         "040109010201010103612e6202414200010101000102030400",
+    );
+    assert_wire(
+        &NoticeObservation {
+            generation: 5,
+            notices: vec![Notice {
+                id: 11,
+                kind: NoticeKind::AppSwitcher {
+                    view: SwitcherView {
+                        windows: vec![SwitcherWindow {
+                            id: 7,
+                            pid: 42,
+                            app: ForegroundApp {
+                                id: "a.b".into(),
+                                display_name: "AB".into(),
+                            },
+                            title: String::new(),
+                        }],
+                        rows: SwitcherRows::default(),
+                        icons: BTreeMap::new(),
+                        row: Some(SwitcherRow::Windows),
+                        column: Some(0),
+                    },
+                },
+            }],
+            language: None,
+        },
+        "05010b0201075403612e6202414200000000000100010000",
     );
 }
 

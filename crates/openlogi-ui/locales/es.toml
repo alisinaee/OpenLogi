@@ -1025,3 +1025,9 @@ reading_sidetone = "Leyendo el efecto local…"
 couldnt_read_sidetone_click_to_retry = "No se pudo leer el efecto local. Haz clic para reintentar."
 device_offline_sidetone_is_unavailable = "El efecto local no está disponible mientras los auriculares estén sin conexión."
 sidetone_unsupported = "Estos auriculares no indican que admitan efecto local ajustable."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

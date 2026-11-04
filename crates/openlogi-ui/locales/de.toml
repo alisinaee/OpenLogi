@@ -1025,3 +1025,9 @@ reading_sidetone = "Mithörton wird gelesen…"
 couldnt_read_sidetone_click_to_retry = "Mithörton konnte nicht gelesen werden. Zum Wiederholen klicken."
 device_offline_sidetone_is_unavailable = "Der Mithörton ist nicht verfügbar, solange das Headset offline ist."
 sidetone_unsupported = "Dieses Headset meldet keinen einstellbaren Mithörton."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

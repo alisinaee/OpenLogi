@@ -361,11 +361,12 @@ pub(crate) enum ButtonRuntimeEvent {
         press: ActivePress,
         action: Action,
     },
-    /// Horizontal mouse travel reported while the press is held. Lossy: the
-    /// producer drops it rather than disturb the press when the queue is full.
+    /// Mouse travel reported while the press is held. Lossy: the producer
+    /// drops it rather than disturb the press when the queue is full.
     Motion {
         press: ActivePress,
         dx: i16,
+        dy: i16,
     },
 }
 
@@ -385,10 +386,11 @@ enum ButtonInput {
     WheelWhilePressed {
         token: PressToken,
     },
-    /// The mouse moved sideways by `dx` while the press `token` was down.
+    /// The mouse moved by `dx` and `dy` while the press `token` was down.
     MotionWhilePressed {
         token: PressToken,
         dx: i16,
+        dy: i16,
     },
 }
 
@@ -665,11 +667,11 @@ impl ButtonInputHandle {
         )
     }
 
-    /// Report `dx` counts of sideways travel while `press` is down. Travel is
+    /// Report `dx` and `dy` counts of travel while `press` is down. Travel is
     /// a stream a later report supersedes, so a full queue drops it quietly:
     /// invalidating every press, as a lost release does, would end the very
     /// hold the travel belongs to.
-    pub(crate) fn try_motion_while_pressed(&self, token: &PressToken, dx: i16) -> bool {
+    pub(crate) fn try_motion_while_pressed(&self, token: &PressToken, dx: i16, dy: i16) -> bool {
         let generation = self.generation.load(Ordering::Acquire);
         if token.generation != generation || !self.accepting.load(Ordering::Acquire) {
             return false;
@@ -680,6 +682,7 @@ impl ButtonInputHandle {
                 input: ButtonInput::MotionWhilePressed {
                     token: token.clone(),
                     dx,
+                    dy,
                 },
             })
             .is_ok()

@@ -1441,6 +1441,7 @@ fn motion_reaches_only_live_presses() {
     let motion = |token: &PressToken| ButtonInput::MotionWhilePressed {
         token: token.clone(),
         dx: 7,
+        dy: 0,
     };
     let mut events = Vec::new();
     process_input(&mut state, motion(&press.token), &mut |e| events.push(e));

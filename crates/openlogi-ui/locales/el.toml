@@ -1025,3 +1025,9 @@ reading_sidetone = "Ανάγνωση sidetone…"
 couldnt_read_sidetone_click_to_retry = "Δεν ήταν δυνατή η ανάγνωση του sidetone. Πατήστε για νέα προσπάθεια."
 device_offline_sidetone_is_unavailable = "Τα ακουστικά είναι εκτός σύνδεσης. Το sidetone δεν είναι διαθέσιμο."
 sidetone_unsupported = "Τα ακουστικά δεν ανέφεραν υποστήριξη ρυθμιζόμενου sidetone."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

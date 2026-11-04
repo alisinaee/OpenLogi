@@ -2,7 +2,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use openlogi_core::app::ForegroundApp;
 use openlogi_core::binding::{ButtonId, StepPx};
+use openlogi_core::switcher_rows::{SwitcherRows, SwitcherView, SwitcherWindow};
+use std::collections::BTreeMap;
+use std::sync::{Mutex, PoisonError};
 
 use super::*;
 
@@ -53,7 +57,7 @@ fn steps(log: &Log) -> Vec<SwitchDirection> {
 
 fn open(switchers: &mut HeldAppSwitchers<FakeKeys>, token: &PressToken, step: u16) -> Arc<Log> {
     let log = Arc::new(Log::default());
-    switchers.start_with(token, stepper(step), FakeKeys(Arc::clone(&log)));
+    switchers.start_with(token, stepper(step), FakeKeys(Arc::clone(&log)), None);
     log
 }
 
@@ -63,8 +67,8 @@ fn travel_steps_the_switcher_and_release_lets_go_exactly_once() {
     let token = press(1);
     let log = open(&mut switchers, &token, 60);
 
-    switchers.motion(&token, 70);
-    switchers.motion(&token, -70);
+    switchers.motion(&token, 70, 0);
+    switchers.motion(&token, -70, 0);
     assert_eq!(
         steps(&log),
         [SwitchDirection::Forward, SwitchDirection::Backward,]
@@ -74,7 +78,7 @@ fn travel_steps_the_switcher_and_release_lets_go_exactly_once() {
     switchers.end(&token);
     assert_eq!(log.released.load(Ordering::SeqCst), 1);
     // The press is over: late travel and a second end are inert.
-    switchers.motion(&token, 500);
+    switchers.motion(&token, 500, 0);
     switchers.end(&token);
     assert_eq!(steps(&log).len(), 2);
     assert_eq!(log.released.load(Ordering::SeqCst), 1);
@@ -85,7 +89,7 @@ fn travel_for_another_press_or_before_the_hold_steps_nothing() {
     let mut switchers = HeldAppSwitchers::default();
     let held = press(1);
     let log = open(&mut switchers, &held, 60);
-    switchers.motion(&press(2), 500);
+    switchers.motion(&press(2), 500, 0);
     assert!(steps(&log).is_empty());
 }
 
@@ -96,6 +100,7 @@ fn a_press_that_never_ends_releases_at_the_limit() {
         FakeKeys(Arc::clone(&log)),
         stepper(60),
         Duration::from_millis(30),
+        None,
     );
     for _ in 0..200 {
         if log.released.load(Ordering::SeqCst) > 0 {
@@ -111,7 +116,7 @@ fn a_press_that_never_ends_releases_at_the_limit() {
 
     // A lost release arriving afterwards finds nothing left to release,
     // and travel can no longer type into whatever is now focused.
-    hold.motion(500);
+    hold.motion(500, 0);
     assert!(steps(&log).is_empty());
     drop(hold);
     assert_eq!(log.released.load(Ordering::SeqCst), 1);
@@ -124,6 +129,7 @@ fn ending_before_the_limit_retires_the_watchdog_without_a_second_release() {
         FakeKeys(Arc::clone(&log)),
         stepper(60),
         Duration::from_millis(40),
+        None,
     );
     drop(hold);
     assert_eq!(log.released.load(Ordering::SeqCst), 1);
@@ -157,8 +163,9 @@ fn the_modifier_outlasts_the_last_typed_key_by_the_settle_time() {
         stepped: false,
         last_key: Instant::now(),
         settle,
+        overlay: None,
     };
-    hold.motion(70);
+    hold.motion(70, 0);
     let stepped = Instant::now();
     assert!(hold.release());
     assert!(stepped.elapsed() >= settle.saturating_sub(Duration::from_millis(5)));
@@ -171,6 +178,7 @@ fn the_modifier_outlasts_the_last_typed_key_by_the_settle_time() {
         stepped: true,
         last_key: Instant::now().checked_sub(settle).expect("uptime"),
         settle,
+        overlay: None,
     };
     let started = Instant::now();
     assert!(hold.release());
@@ -184,7 +192,7 @@ fn a_hold_without_travel_is_cancelled_on_release() {
     let token = press(1);
     let log = open(&mut switchers, &token, 60);
     // Travel short of a step is still no step.
-    switchers.motion(&token, 30);
+    switchers.motion(&token, 30, 0);
     switchers.end(&token);
     assert!(steps(&log).is_empty());
     assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
@@ -196,9 +204,184 @@ fn a_hold_that_stepped_opens_the_chosen_app_on_release() {
     let mut switchers = HeldAppSwitchers::default();
     let token = press(1);
     let log = open(&mut switchers, &token, 60);
-    switchers.motion(&token, 70);
+    switchers.motion(&token, 70, 0);
     switchers.end(&token);
     assert_eq!(steps(&log), [SwitchDirection::Forward]);
     assert_eq!(log.cancelled.load(Ordering::SeqCst), 0);
     assert_eq!(log.released.load(Ordering::SeqCst), 1);
+}
+
+/// A port that records what the hold shows and takes down.
+#[derive(Default)]
+struct RecordingPort {
+    shown: Mutex<Vec<SwitcherView>>,
+    hidden: AtomicUsize,
+    activated: Mutex<Vec<SwitcherTarget>>,
+}
+
+impl SwitcherPort for RecordingPort {
+    fn snapshot(&self) -> SwitcherView {
+        let window = |id| SwitcherWindow {
+            id,
+            pid: 1,
+            app: ForegroundApp::unnamed("a".to_owned()),
+            title: String::new(),
+        };
+        SwitcherView::new(
+            vec![window(1), window(2)],
+            SwitcherRows::default(),
+            BTreeMap::new(),
+        )
+    }
+
+    fn show(&self, view: &SwitcherView) {
+        self.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(view.clone());
+    }
+
+    fn hide(&self) {
+        self.hidden.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn activate(&self, target: &SwitcherTarget) {
+        self.activated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(target.clone());
+    }
+}
+
+#[test]
+fn travel_draws_the_rows_and_release_takes_them_down() {
+    let port = Arc::new(RecordingPort::default());
+    let log = Arc::new(Log::default());
+    let overlay = Overlay::new(
+        Arc::clone(&port) as Arc<dyn SwitcherPort>,
+        StepPx::try_from(60).expect("in range"),
+    );
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&log))),
+        stepper: stepper(60),
+        stepped: false,
+        last_key: Instant::now(),
+        settle: Duration::ZERO,
+        overlay: Some(overlay),
+    };
+    hold.motion(0, 70);
+    let shown = || {
+        port.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    };
+    assert_eq!(shown(), 1, "the first travel opens and shows the rows");
+    hold.motion(-70, 0);
+    assert_eq!(shown(), 2, "a move of the selection shows it again");
+    assert_eq!(port.hidden.load(Ordering::SeqCst), 0);
+    assert!(hold.release());
+    assert_eq!(
+        port.hidden.load(Ordering::SeqCst),
+        1,
+        "release takes the rows down"
+    );
+    assert!(!hold.release(), "a second release does nothing");
+    assert_eq!(port.hidden.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_hold_without_travel_never_reads_the_windows() {
+    let port = Arc::new(RecordingPort::default());
+    let log = Arc::new(Log::default());
+    let overlay = Overlay::new(
+        Arc::clone(&port) as Arc<dyn SwitcherPort>,
+        StepPx::try_from(60).expect("in range"),
+    );
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(log)),
+        stepper: stepper(60),
+        stepped: false,
+        last_key: Instant::now(),
+        settle: Duration::ZERO,
+        overlay: Some(overlay),
+    };
+    assert!(hold.release());
+    assert!(
+        port.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+    );
+    assert_eq!(
+        port.hidden.load(Ordering::SeqCst),
+        0,
+        "nothing was drawn to take down"
+    );
+}
+
+#[test]
+fn releasing_on_a_window_dismisses_the_native_switcher_and_raises_it() {
+    let port = Arc::new(RecordingPort::default());
+    let log = Arc::new(Log::default());
+    let overlay = Overlay::new(
+        Arc::clone(&port) as Arc<dyn SwitcherPort>,
+        StepPx::try_from(60).expect("in range"),
+    );
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&log))),
+        stepper: stepper(60),
+        stepped: false,
+        last_key: Instant::now(),
+        settle: Duration::ZERO,
+        overlay: Some(overlay),
+    };
+    // Down through the rows: the first travel opens on the second window,
+    // and moving left selects the first one.
+    hold.motion(-70, 0);
+    assert!(hold.release());
+    assert_eq!(
+        log.cancelled.load(Ordering::SeqCst),
+        1,
+        "the native switcher is dismissed"
+    );
+    assert_eq!(log.released.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *port
+            .activated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        [SwitcherTarget::Window { pid: 1, id: 1 }],
+        "the window the cursor was on comes forward"
+    );
+}
+
+#[test]
+fn a_hold_that_never_moved_activates_nothing() {
+    let port = Arc::new(RecordingPort::default());
+    let log = Arc::new(Log::default());
+    let overlay = Overlay::new(
+        Arc::clone(&port) as Arc<dyn SwitcherPort>,
+        StepPx::try_from(60).expect("in range"),
+    );
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&log))),
+        stepper: stepper(60),
+        stepped: false,
+        last_key: Instant::now(),
+        settle: Duration::ZERO,
+        overlay: Some(overlay),
+    };
+    assert!(hold.release());
+    assert_eq!(
+        log.cancelled.load(Ordering::SeqCst),
+        1,
+        "a hold without travel cancels"
+    );
+    assert!(
+        port.activated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+    );
 }

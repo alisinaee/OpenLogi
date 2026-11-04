@@ -1025,3 +1025,9 @@ reading_sidetone = "Aflæser sidetone…"
 couldnt_read_sidetone_click_to_retry = "Sidetonen kunne ikke aflæses. Klik for at prøve igen."
 device_offline_sidetone_is_unavailable = "Sidetone er ikke tilgængelig, mens headsettet er offline."
 sidetone_unsupported = "Dette headset oplyser ikke, at justerbar sidetone understøttes."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

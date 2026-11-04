@@ -1025,3 +1025,9 @@ reading_sidetone = "Sidetone lezen…"
 couldnt_read_sidetone_click_to_retry = "Sidetone kan niet worden gelezen. Klik om het opnieuw te proberen."
 device_offline_sidetone_is_unavailable = "Sidetone is niet beschikbaar zolang de headset offline is."
 sidetone_unsupported = "Deze headset meldt geen ondersteuning voor instelbare sidetone."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"
