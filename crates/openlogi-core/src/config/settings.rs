@@ -327,6 +327,11 @@ pub struct AppSettings {
     /// reads window frames only, never titles. Only macOS reads it.
     #[serde(default = "default_true")]
     pub desktop_switcher_show_apps: bool,
+    /// The apps of the app switcher's Pinned row, in order, as application
+    /// identifiers (bundle ids on macOS). Empty by default; at most
+    /// [`MAX_PINNED`](crate::switcher_rows::MAX_PINNED) are used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_apps: Vec<String>,
     /// Whether macOS may accelerate OpenLogi's smoothed wheel output, so a fast
     /// spin scrolls farther per notch than a slow one. **On by default**
     /// (today's behaviour: a smoothed wheel is posted as wheel ticks, which
@@ -641,6 +646,7 @@ impl Default for AppSettings {
             smooth_wheel_duration_ms: WheelFeel::DURATION_MS_DEFAULT,
             smooth_wheel_easing: WheelEasing::Smooth,
             desktop_switcher_show_apps: true,
+            pinned_apps: Vec::new(),
         }
     }
 }
