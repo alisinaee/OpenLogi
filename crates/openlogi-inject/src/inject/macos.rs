@@ -15,6 +15,11 @@ use openlogi_core::binding::{
 
 use super::{HeldKey, HeldModifiers, KeyPhase};
 
+#[expect(
+    unsafe_code,
+    reason = "AX window raise uses the private _AXUIElementGetWindow symbol, resolved via dlsym"
+)]
+mod app_focus;
 /// Shared resolver for private ApplicationServices and SkyLight SPI.
 #[expect(
     unsafe_code,
@@ -81,6 +86,7 @@ mod symbolic_hotkey;
 mod tests;
 mod virtual_keyboard;
 
+pub(super) use app_focus::{activate_app, focus_window};
 use app_services::symbol as app_services_symbol;
 pub(super) use browser::ax_browser_navigate;
 use dock::{app_expose, launchpad, mission_control, show_desktop};

@@ -419,6 +419,61 @@ pub fn set_desktop_observer(observer: Option<DesktopObserver>) {
     }
 }
 
+/// Bring window `window_id` of the process `pid` to the front, and its app with
+/// it. Only macOS raises single windows; elsewhere this does nothing.
+pub fn focus_window(pid: i32, window_id: u32) {
+    cfg_select! {
+        target_os = "macos" => {
+            macos::focus_window(pid, window_id);
+        }
+        _ => {
+            let _ = (pid, window_id);
+        }
+    }
+}
+
+/// Bring the running app with `bundle_id` to the front. `false` when no such
+/// app runs, or off macOS.
+pub fn activate_app(bundle_id: &str) -> bool {
+    cfg_select! {
+        target_os = "macos" => {
+            macos::activate_app(bundle_id)
+        }
+        _ => {
+            let _ = bundle_id;
+            false
+        }
+    }
+}
+
+/// Start the app named by `id`: its bundle identifier on macOS, or a path or
+/// URL to open. Used when the app is not running.
+pub fn launch_app(id: &str) {
+    cfg_select! {
+        target_os = "macos" => {
+            if id.starts_with('/') {
+                open_target(id);
+            } else {
+                match std::process::Command::new("/usr/bin/open").args(["-b", id]).status() {
+                    Ok(status) if status.success() => {}
+                    Ok(status) => tracing::warn!(id, %status, "could not start application"),
+                    Err(error) => tracing::warn!(id, %error, "could not start application"),
+                }
+            }
+        }
+        _ => {
+            open_target(id);
+        }
+    }
+}
+
+fn open_target(target: &str) {
+    let expanded = shellexpand::tilde(target);
+    if let Err(error) = opener::open(expanded.as_ref()) {
+        tracing::warn!(%error, target, "could not start application");
+    }
+}
+
 /// The windows the app switcher lists, front-most first, with the icon file
 /// of each app that owns one. Frames and owners only, never titles, so
 /// reading them needs no Screen Recording permission. Only macOS lists
