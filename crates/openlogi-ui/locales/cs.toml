@@ -1017,3 +1017,9 @@ reading_sidetone = "Načítání příposlechu…"
 couldnt_read_sidetone_click_to_retry = "Příposlech se nepodařilo načíst. Kliknutím to zkuste znovu."
 device_offline_sidetone_is_unavailable = "Příposlech není dostupný, když jsou sluchátka odpojená."
 sidetone_unsupported = "Tato sluchátka nehlásí podporu nastavitelného příposlechu."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

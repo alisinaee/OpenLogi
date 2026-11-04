@@ -1017,3 +1017,9 @@ reading_sidetone = "Odczytywanie sidetone…"
 couldnt_read_sidetone_click_to_retry = "Nie udało się odczytać sidetone. Kliknij, aby spróbować ponownie."
 device_offline_sidetone_is_unavailable = "Zestaw słuchawkowy jest offline. Sidetone jest niedostępny."
 sidetone_unsupported = "Ten zestaw słuchawkowy nie zgłosił obsługi regulowanego sidetone."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

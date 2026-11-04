@@ -1017,3 +1017,9 @@ reading_sidetone = "正在读取侧音…"
 couldnt_read_sidetone_click_to_retry = "无法读取侧音，请点击重试。"
 device_offline_sidetone_is_unavailable = "耳机离线，侧音不可用。"
 sidetone_unsupported = "此耳机未报告可调侧音支持。"
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

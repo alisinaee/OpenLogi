@@ -1017,3 +1017,9 @@ reading_sidetone = "Lendo o tom lateral…"
 couldnt_read_sidetone_click_to_retry = "Não foi possível ler o tom lateral. Clique para tentar novamente."
 device_offline_sidetone_is_unavailable = "O tom lateral fica indisponível enquanto o headset está off-line."
 sidetone_unsupported = "O headset não informa suporte a tom lateral ajustável."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

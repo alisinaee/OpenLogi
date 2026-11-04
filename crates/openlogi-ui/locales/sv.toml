@@ -1017,3 +1017,9 @@ reading_sidetone = "Läser sidoton…"
 couldnt_read_sidetone_click_to_retry = "Kunde inte läsa sidotonen. Klicka för att försöka igen."
 device_offline_sidetone_is_unavailable = "Sidoton är inte tillgänglig när headsetet är frånkopplat."
 sidetone_unsupported = "Headsetet uppger inte stöd för justerbar sidoton."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

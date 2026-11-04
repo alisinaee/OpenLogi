@@ -1017,3 +1017,9 @@ reading_sidetone = "Чытанне самапраслухоўвання…"
 couldnt_read_sidetone_click_to_retry = "Не ўдалося прачытаць самапраслухоўванне. Націсніце, каб паўтарыць."
 device_offline_sidetone_is_unavailable = "Гарнітура па-за сеткай. Самапраслухоўванне недаступнае."
 sidetone_unsupported = "Гарнітура не паведамляе пра падтрымку рэгуляванага самапраслухоўвання."
+
+[app_switcher]
+windows = "Windows"
+pinned = "Pinned"
+recent = "Recent"
+most_used = "Most used"

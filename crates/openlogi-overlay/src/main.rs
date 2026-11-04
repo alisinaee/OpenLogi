@@ -16,6 +16,7 @@
 // crate this one already depends on for locale negotiation.
 rust_i18n::i18n!("../openlogi-ui/locales", fallback = "en");
 
+mod app_switcher;
 mod backlight;
 mod desktop_switch;
 mod ipc;
@@ -86,8 +87,10 @@ fn main() -> Result<()> {
         cx.spawn(async move |cx| {
             while let Some(observed) = notices.recv().await {
                 openlogi_core::locale::activate(observed.language.as_deref());
-                // The desktop switcher is drawn in place, apart from the cards.
-                let (switcher, notices) = desktop_switch::split(observed.notices);
+                // The switchers are drawn in place, apart from the cards.
+                let (app_switcher, notices) = app_switcher::split(observed.notices);
+                cx.update(|cx| app_switcher::present(cx, app_switcher));
+                let (switcher, notices) = desktop_switch::split(notices);
                 cx.update(|cx| desktop_switch::present(cx, switcher));
                 let Some(cards) = shelf.borrow_mut().observe(notices) else {
                     continue;
