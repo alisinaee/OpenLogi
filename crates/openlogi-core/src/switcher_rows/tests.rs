@@ -79,6 +79,8 @@ fn sideways_walks_the_row_and_clamps() {
     assert!(cursor.motion(10, 0));
     assert_eq!(cursor.column(), Some(2));
     assert!(!cursor.motion(50, 0));
+    assert!(cursor.motion(-30, 0), "one report moves one entry");
+    assert_eq!(cursor.column(), Some(1));
     assert!(cursor.motion(-30, 0));
     assert_eq!(cursor.column(), Some(0));
 }
@@ -88,6 +90,7 @@ fn vertical_skips_empty_rows_and_remembers_columns() {
     let mut cursor = RowsCursor::new([3, 0, 4, 2], 0, step());
     assert!(cursor.motion(0, 10));
     assert_eq!(cursor.row(), SwitcherRow::Recent);
+    assert!(cursor.motion(20, 0));
     assert!(cursor.motion(20, 0));
     assert_eq!(cursor.column(), Some(2));
     assert!(cursor.motion(0, 10));
@@ -106,7 +109,7 @@ fn dominant_axis_wins_a_diagonal_report() {
     assert!(cursor.motion(20, 10));
     assert_eq!(
         (cursor.row(), cursor.column()),
-        (SwitcherRow::Windows, Some(2))
+        (SwitcherRow::Windows, Some(1))
     );
 }
 
@@ -117,4 +120,48 @@ fn emptied_row_returns_to_windows() {
     assert_eq!(cursor.row(), SwitcherRow::Pinned);
     cursor.set_lens([1, 0, 0, 0]);
     assert_eq!(cursor.row(), SwitcherRow::Windows);
+}
+
+fn window(id: u32, title: &str) -> SwitcherWindow {
+    SwitcherWindow {
+        id,
+        pid: 1,
+        app: app("finder"),
+        title: title.into(),
+    }
+}
+
+#[test]
+fn the_view_selects_the_entry_under_the_cursor() {
+    let mut usage = AppUsage::default();
+    usage.record(&app("a"));
+    usage.record(&app("b"));
+    let rows = usage.rows(&["p".to_owned()], &[], None);
+    let mut view = SwitcherView::new(
+        vec![window(1, "one"), window(2, "two")],
+        rows,
+        BTreeMap::new(),
+    );
+    let mut cursor = RowsCursor::new(view.lens(), 1, step());
+    view.follow(&cursor);
+    assert_eq!(
+        view.selection(),
+        Some(Selection::Window(&window(2, "two"))),
+        "two windows of one app are two entries"
+    );
+    assert!(cursor.motion(0, 10));
+    view.follow(&cursor);
+    let Some(Selection::App(pinned)) = view.selection() else {
+        panic!("the pinned row holds apps");
+    };
+    assert_eq!(pinned.app.id, "p");
+    assert_eq!(pinned.activation(), Activation::Launch);
+}
+
+#[test]
+fn the_windows_row_is_bounded() {
+    let many = (0..40).map(|n| window(n, "w")).collect();
+    let view = SwitcherView::new(many, SwitcherRows::default(), BTreeMap::new());
+    assert_eq!(view.windows.len(), MAX_WINDOW_TILES);
+    assert_eq!(view.selection(), None, "an unplaced cursor selects nothing");
 }

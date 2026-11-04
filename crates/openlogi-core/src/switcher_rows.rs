@@ -116,6 +116,90 @@ impl SwitcherRows {
     }
 }
 
+/// The most window tiles the windows row shows.
+pub const MAX_WINDOW_TILES: usize = 12;
+
+/// One open window, a tile of the windows row. Separate windows of one app are
+/// separate tiles.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwitcherWindow {
+    /// The window server's id of the window, which names it exactly.
+    pub id: u32,
+    /// The process that owns it.
+    pub pid: i32,
+    /// The app that owns it.
+    pub app: ForegroundApp,
+    /// The window's title; empty when it has none.
+    pub title: String,
+}
+
+/// What the entry the cursor is on does when the button is released.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Selection<'a> {
+    /// Bring this exact window to the front.
+    Window(&'a SwitcherWindow),
+    /// Bring this app to the front, or start it.
+    App(&'a RowApp),
+}
+
+/// Everything the overlay draws for an open switcher: the four rows and where
+/// the cursor is. The agent sends a new one for every selection change.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwitcherView {
+    /// Row 0.
+    pub windows: Vec<SwitcherWindow>,
+    /// Rows 1 to 3.
+    pub rows: SwitcherRows,
+    /// Rendered icon file per app id, for the apps that have one.
+    pub icons: BTreeMap<String, String>,
+    /// The row the cursor is in.
+    pub row: Option<SwitcherRow>,
+    /// The selected entry of [`Self::row`].
+    pub column: Option<u16>,
+}
+
+impl SwitcherView {
+    /// A view of `windows` and `rows`, cut to the bounds the rows keep, with
+    /// the cursor not yet placed.
+    #[must_use]
+    pub fn new(
+        mut windows: Vec<SwitcherWindow>,
+        rows: SwitcherRows,
+        icons: BTreeMap<String, String>,
+    ) -> Self {
+        windows.truncate(MAX_WINDOW_TILES);
+        Self {
+            windows,
+            rows,
+            icons,
+            row: None,
+            column: None,
+        }
+    }
+
+    /// The entry counts of the four rows, which size a [`RowsCursor`].
+    #[must_use]
+    pub fn lens(&self) -> [usize; 4] {
+        self.rows.lens(self.windows.len())
+    }
+
+    /// Put the selection where `cursor` is.
+    pub fn follow(&mut self, cursor: &RowsCursor) {
+        self.row = Some(cursor.row());
+        self.column = cursor.column().and_then(|c| u16::try_from(c).ok());
+    }
+
+    /// The selected entry, if the cursor is on one.
+    #[must_use]
+    pub fn selection(&self) -> Option<Selection<'_>> {
+        let column = usize::from(self.column?);
+        match self.row? {
+            SwitcherRow::Windows => self.windows.get(column).map(Selection::Window),
+            row => self.rows.row(row).get(column).map(Selection::App),
+        }
+    }
+}
+
 /// The remembered activations: which apps were frontmost last, and how often
 /// each was brought to the front. Both are bounded ([`MAX_RECENT`],
 /// [`MAX_TRACKED`]), so the persisted form cannot grow without limit.
