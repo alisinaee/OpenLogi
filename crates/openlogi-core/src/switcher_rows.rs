@@ -200,6 +200,48 @@ impl SwitcherView {
     }
 }
 
+/// An open switcher's view and the cursor that moves over it, kept together
+/// so the selection the overlay draws and the one a release activates can
+/// never disagree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwitcherSelection {
+    view: SwitcherView,
+    cursor: RowsCursor,
+}
+
+impl SwitcherSelection {
+    /// Open on `view` with the cursor on the windows row at column `start`,
+    /// moving once per `step` counts of travel.
+    #[must_use]
+    pub fn open(mut view: SwitcherView, start: usize, step: StepPx) -> Self {
+        let cursor = RowsCursor::new(view.lens(), start, step);
+        view.follow(&cursor);
+        Self { view, cursor }
+    }
+
+    /// Account for one mouse report. Returns whether the selection moved, in
+    /// which case [`Self::view`] is the new view to publish.
+    pub fn motion(&mut self, dx: i16, dy: i16) -> bool {
+        let moved = self.cursor.motion(dx, dy);
+        if moved {
+            self.view.follow(&self.cursor);
+        }
+        moved
+    }
+
+    /// What the overlay draws now.
+    #[must_use]
+    pub const fn view(&self) -> &SwitcherView {
+        &self.view
+    }
+
+    /// The entry a release activates, if the cursor is on one.
+    #[must_use]
+    pub fn selection(&self) -> Option<Selection<'_>> {
+        self.view.selection()
+    }
+}
+
 /// The remembered activations: which apps were frontmost last, and how often
 /// each was brought to the front. Both are bounded ([`MAX_RECENT`],
 /// [`MAX_TRACKED`]), so the persisted form cannot grow without limit.

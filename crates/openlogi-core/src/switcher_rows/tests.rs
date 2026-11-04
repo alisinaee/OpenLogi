@@ -165,3 +165,34 @@ fn the_windows_row_is_bounded() {
     assert_eq!(view.windows.len(), MAX_WINDOW_TILES);
     assert_eq!(view.selection(), None, "an unplaced cursor selects nothing");
 }
+
+#[test]
+fn the_selection_moves_with_the_cursor_and_reports_motion() {
+    let mut usage = AppUsage::default();
+    usage.record(&app("a"));
+    let rows = usage.rows(&[], &[], None);
+    let view = SwitcherView::new(
+        vec![window(1, "one"), window(2, "two")],
+        rows,
+        BTreeMap::new(),
+    );
+    let mut selection = SwitcherSelection::open(view, 1, step());
+    assert_eq!(
+        selection.selection(),
+        Some(Selection::Window(&window(2, "two"))),
+        "the window the native order picks first is selected on open"
+    );
+    assert!(!selection.motion(0, 0), "no travel, no change");
+    assert!(selection.motion(0, 10), "moving down enters the recent row");
+    assert_eq!(selection.view().row, Some(SwitcherRow::Recent));
+    let Some(Selection::App(app)) = selection.selection() else {
+        panic!("the recent row holds apps");
+    };
+    assert_eq!(app.app.id, "a");
+    assert!(selection.motion(0, -10), "moving up returns to the windows");
+    assert_eq!(
+        selection.selection(),
+        Some(Selection::Window(&window(2, "two"))),
+        "the windows row remembers its column"
+    );
+}
