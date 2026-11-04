@@ -216,6 +216,7 @@ fn a_hold_that_stepped_opens_the_chosen_app_on_release() {
 struct RecordingPort {
     shown: Mutex<Vec<SwitcherView>>,
     hidden: AtomicUsize,
+    activated: Mutex<Vec<SwitcherTarget>>,
 }
 
 impl SwitcherPort for RecordingPort {
@@ -242,6 +243,13 @@ impl SwitcherPort for RecordingPort {
 
     fn hide(&self) {
         self.hidden.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn activate(&self, target: &SwitcherTarget) {
+        self.activated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(target.clone());
     }
 }
 
@@ -309,5 +317,71 @@ fn a_hold_without_travel_never_reads_the_windows() {
         port.hidden.load(Ordering::SeqCst),
         0,
         "nothing was drawn to take down"
+    );
+}
+
+#[test]
+fn releasing_on_a_window_dismisses_the_native_switcher_and_raises_it() {
+    let port = Arc::new(RecordingPort::default());
+    let log = Arc::new(Log::default());
+    let overlay = Overlay::new(
+        Arc::clone(&port) as Arc<dyn SwitcherPort>,
+        StepPx::try_from(60).expect("in range"),
+    );
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&log))),
+        stepper: stepper(60),
+        stepped: false,
+        last_key: Instant::now(),
+        settle: Duration::ZERO,
+        overlay: Some(overlay),
+    };
+    // Down through the rows: the first travel opens on the second window,
+    // and moving left selects the first one.
+    hold.motion(-70, 0);
+    assert!(hold.release());
+    assert_eq!(
+        log.cancelled.load(Ordering::SeqCst),
+        1,
+        "the native switcher is dismissed"
+    );
+    assert_eq!(log.released.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *port
+            .activated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        [SwitcherTarget::Window { pid: 1, id: 1 }],
+        "the window the cursor was on comes forward"
+    );
+}
+
+#[test]
+fn a_hold_that_never_moved_activates_nothing() {
+    let port = Arc::new(RecordingPort::default());
+    let log = Arc::new(Log::default());
+    let overlay = Overlay::new(
+        Arc::clone(&port) as Arc<dyn SwitcherPort>,
+        StepPx::try_from(60).expect("in range"),
+    );
+    let mut hold = SwitcherHold {
+        keys: Some(FakeKeys(Arc::clone(&log))),
+        stepper: stepper(60),
+        stepped: false,
+        last_key: Instant::now(),
+        settle: Duration::ZERO,
+        overlay: Some(overlay),
+    };
+    assert!(hold.release());
+    assert_eq!(
+        log.cancelled.load(Ordering::SeqCst),
+        1,
+        "a hold without travel cancels"
+    );
+    assert!(
+        port.activated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
     );
 }

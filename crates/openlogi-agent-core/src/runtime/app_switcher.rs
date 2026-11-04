@@ -21,7 +21,7 @@ use openlogi_core::switcher_rows::SwitcherSelection;
 use tracing::{debug, warn};
 
 use super::PressToken;
-use crate::switcher::{NoSwitcherOverlay, SwitcherPort};
+use crate::switcher::{NoSwitcherOverlay, SwitcherPort, SwitcherTarget};
 
 /// The rows a hold draws once the mouse has moved: the port that shows them,
 /// the step the travel counts in, and the selection, opened on the first
@@ -56,6 +56,11 @@ impl Overlay {
         if opened || moved {
             port.show(selection.view());
         }
+    }
+
+    /// The entry the cursor is on, if the rows are open and it is on one.
+    fn target(&self) -> Option<SwitcherTarget> {
+        self.selection.as_ref()?.selection().map(SwitcherTarget::of)
     }
 
     /// The press ended: take the rows down, if any were shown.
@@ -143,14 +148,19 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
     /// The modifier outlasts the last typed key by the settle time, so the
     /// native switcher has handled that key before it sees the release.
     fn release(&mut self) -> bool {
-        if let Some(overlay) = self.overlay.take() {
+        let overlay = self.overlay.take();
+        let target = overlay.as_ref().and_then(Overlay::target);
+        let port = overlay.as_ref().map(|overlay| Arc::clone(&overlay.port));
+        if let Some(overlay) = overlay {
             overlay.end();
         }
         let Some(keys) = self.keys.as_mut() else {
             return false;
         };
-        if !self.stepped {
-            debug!("app switcher hold without travel — cancelled");
+        // Choosing an entry dismisses the native switcher too, so its own
+        // highlight never activates an app instead of the one chosen here.
+        if !self.stepped || target.is_some() {
+            debug!(chosen = target.is_some(), "app switcher dismissed");
             keys.cancel();
             self.last_key = Instant::now();
         }
@@ -159,7 +169,11 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
             thread::sleep(wait);
         }
         debug!(?wait, "app switcher modifier released");
-        self.keys.take().is_some()
+        let released = self.keys.take().is_some();
+        if let (true, Some(port), Some(target)) = (released, port, target) {
+            port.activate(&target);
+        }
+        released
     }
 }
 
