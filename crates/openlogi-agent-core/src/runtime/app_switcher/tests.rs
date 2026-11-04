@@ -10,6 +10,7 @@ use super::*;
 struct Log {
     steps: Mutex<Vec<SwitchDirection>>,
     released: AtomicUsize,
+    cancelled: AtomicUsize,
 }
 
 /// Records the steps it is asked for and counts its own release.
@@ -22,6 +23,10 @@ impl SwitcherKeys for FakeKeys {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(direction);
+    }
+
+    fn cancel(&mut self) {
+        self.0.cancelled.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -59,14 +64,10 @@ fn travel_steps_the_switcher_and_release_lets_go_exactly_once() {
     let log = open(&mut switchers, &token, 60);
 
     switchers.motion(&token, 70);
-    switchers.motion(&token, -130);
+    switchers.motion(&token, -70);
     assert_eq!(
         steps(&log),
-        [
-            SwitchDirection::Forward,
-            SwitchDirection::Backward,
-            SwitchDirection::Backward,
-        ]
+        [SwitchDirection::Forward, SwitchDirection::Backward,]
     );
     assert_eq!(log.released.load(Ordering::SeqCst), 0, "held while pressed");
 
@@ -75,7 +76,7 @@ fn travel_steps_the_switcher_and_release_lets_go_exactly_once() {
     // The press is over: late travel and a second end are inert.
     switchers.motion(&token, 500);
     switchers.end(&token);
-    assert_eq!(steps(&log).len(), 3);
+    assert_eq!(steps(&log).len(), 2);
     assert_eq!(log.released.load(Ordering::SeqCst), 1);
 }
 
@@ -153,6 +154,7 @@ fn the_modifier_outlasts_the_last_typed_key_by_the_settle_time() {
     let mut hold = SwitcherHold {
         keys: Some(FakeKeys(Arc::clone(&log))),
         stepper: stepper(60),
+        stepped: false,
         last_key: Instant::now(),
         settle,
     };
@@ -166,6 +168,7 @@ fn the_modifier_outlasts_the_last_typed_key_by_the_settle_time() {
     let mut hold = SwitcherHold {
         keys: Some(FakeKeys(Arc::clone(&idle))),
         stepper: stepper(60),
+        stepped: true,
         last_key: Instant::now().checked_sub(settle).expect("uptime"),
         settle,
     };
@@ -173,4 +176,29 @@ fn the_modifier_outlasts_the_last_typed_key_by_the_settle_time() {
     assert!(hold.release());
     assert!(started.elapsed() < Duration::from_millis(40));
     assert!(!hold.release());
+}
+
+#[test]
+fn a_hold_without_travel_is_cancelled_on_release() {
+    let mut switchers = HeldAppSwitchers::default();
+    let token = press(1);
+    let log = open(&mut switchers, &token, 60);
+    // Travel short of a step is still no step.
+    switchers.motion(&token, 30);
+    switchers.end(&token);
+    assert!(steps(&log).is_empty());
+    assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+    assert_eq!(log.released.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_hold_that_stepped_opens_the_chosen_app_on_release() {
+    let mut switchers = HeldAppSwitchers::default();
+    let token = press(1);
+    let log = open(&mut switchers, &token, 60);
+    switchers.motion(&token, 70);
+    switchers.end(&token);
+    assert_eq!(steps(&log), [SwitchDirection::Forward]);
+    assert_eq!(log.cancelled.load(Ordering::SeqCst), 0);
+    assert_eq!(log.released.load(Ordering::SeqCst), 1);
 }

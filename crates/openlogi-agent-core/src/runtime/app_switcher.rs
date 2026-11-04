@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use openlogi_core::binding::{
     APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, Action, AppSwitcherParams, HeldKeys,
-    SwitchDirection, SwitchStepper, switcher_chord,
+    SwitchDirection, SwitchStepper, switcher_cancel_chord, switcher_chord,
 };
 use tracing::{debug, warn};
 
@@ -26,6 +26,10 @@ use super::PressToken;
 pub(super) trait SwitcherKeys: Send + 'static {
     /// Type one switcher step with the modifier still down.
     fn step(&mut self, direction: SwitchDirection);
+
+    /// Dismiss the open switcher so letting go of the modifier activates
+    /// nothing.
+    fn cancel(&mut self);
 }
 
 /// The real keyboard: the modifier is a held chord, and each step a chord of
@@ -50,6 +54,10 @@ impl SwitcherKeys for SystemKeys {
     fn step(&mut self, direction: SwitchDirection) {
         openlogi_inject::execute(&Action::CustomShortcut(switcher_chord(direction).clone()));
     }
+
+    fn cancel(&mut self) {
+        openlogi_inject::execute(&Action::CustomShortcut(switcher_cancel_chord().clone()));
+    }
 }
 
 /// One open switcher: the held keys, and the stepper that turns the mouse's
@@ -57,6 +65,9 @@ impl SwitcherKeys for SystemKeys {
 struct SwitcherHold<K: SwitcherKeys> {
     keys: Option<K>,
     stepper: SwitchStepper,
+    /// Whether the hold has stepped the switcher at all. A hold that never did
+    /// is cancelled on release: only a quick tap switches app without motion.
+    stepped: bool,
     /// When the hold last typed a key, and how long the modifier must outlast it.
     last_key: Instant,
     settle: Duration,
@@ -72,6 +83,7 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
             for _ in 0..run.count {
                 keys.step(run.direction);
             }
+            self.stepped = true;
             self.last_key = Instant::now();
         }
     }
@@ -81,8 +93,13 @@ impl<K: SwitcherKeys> SwitcherHold<K> {
     /// The modifier outlasts the last typed key by the settle time, so the
     /// native switcher has handled that key before it sees the release.
     fn release(&mut self) -> bool {
-        if self.keys.is_none() {
+        let Some(keys) = self.keys.as_mut() else {
             return false;
+        };
+        if !self.stepped {
+            debug!("app switcher hold without travel — cancelled");
+            keys.cancel();
+            self.last_key = Instant::now();
         }
         let wait = self.settle.saturating_sub(self.last_key.elapsed());
         if !wait.is_zero() {
@@ -110,6 +127,7 @@ impl<K: SwitcherKeys> ActiveHold<K> {
         let hold = Arc::new(Mutex::new(SwitcherHold {
             keys: Some(keys),
             stepper,
+            stepped: false,
             last_key: Instant::now(),
             settle,
         }));

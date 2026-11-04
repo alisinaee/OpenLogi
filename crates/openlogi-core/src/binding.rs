@@ -34,7 +34,7 @@ pub use action_ring::{
 };
 pub use app_switcher::{
     APP_SWITCHER_HOLD_LIMIT, APP_SWITCHER_SETTLE, AppSwitcherBinding, AppSwitcherParams, StepPx,
-    SwitchDirection, SwitchRun, SwitchStepper, switcher_chord,
+    SwitchDirection, SwitchRun, SwitchStepper, switcher_cancel_chord, switcher_chord,
 };
 pub use application_target::{ApplicationTarget, ApplicationTargetError};
 pub use button::{ButtonId, GridKey, GridSlot, KeypadPage, ParseButtonIdError};

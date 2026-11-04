@@ -29,10 +29,6 @@ pub const APP_SWITCHER_HOLD_LIMIT: Duration = Duration::from_secs(10);
 /// step short, or not the highlighted one at all.
 pub const APP_SWITCHER_SETTLE: Duration = Duration::from_millis(60);
 
-/// Most steps one motion report may take. A report that moves further than
-/// this is a sensor glitch, not a deliberate sweep, and the excess is dropped.
-const MAX_STEPS_PER_REPORT: u16 = 4;
-
 /// The hold time of a binding that sets none, in milliseconds.
 const DEFAULT_HOLD_MS: u16 = 250;
 const _: () = assert!(
@@ -41,7 +37,7 @@ const _: () = assert!(
 );
 
 /// The step distance of a binding that sets none, in raw mouse counts.
-const DEFAULT_STEP_PX: u16 = 60;
+const DEFAULT_STEP_PX: u16 = 120;
 
 /// Horizontal travel, in raw sensor counts, that moves the switcher by one
 /// app. The single owner of the accepted range: a value outside
@@ -115,6 +111,20 @@ pub fn switcher_chord(direction: SwitchDirection) -> &'static KeyCombo {
         SwitchDirection::Forward => &FORWARD,
         SwitchDirection::Backward => &BACKWARD,
     }
+}
+
+/// The chord that dismisses the open switcher without activating anything:
+/// Escape with the switcher modifier still down.
+#[must_use]
+pub fn switcher_cancel_chord() -> &'static KeyCombo {
+    static CANCEL: LazyLock<KeyCombo> = LazyLock::new(|| {
+        parse_chord(if cfg!(target_os = "macos") {
+            "Cmd+Escape"
+        } else {
+            "Alt+Escape"
+        })
+    });
+    &CANCEL
 }
 
 const fn base_chord() -> &'static str {
@@ -195,7 +205,7 @@ impl AppSwitcherParams {
 }
 
 /// An app switcher binding that sets its tunables, serialized as
-/// `{ AppSwitcher = { step = 60, hold_ms = 250 } }`. A binding that keeps the
+/// `{ AppSwitcher = { step = 120, hold_ms = 250 } }`. A binding that keeps the
 /// defaults is the plain action `"AppSwitcher"` instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -230,8 +240,9 @@ pub struct SwitchRun {
 /// Turns horizontal mouse travel into switcher steps. Sans-I/O: the caller
 /// feeds each report's `dx` and types the steps it returns.
 ///
-/// Travel accumulates until it reaches one step, and the remainder carries
-/// over, so slow and fast sweeps cover the same distance per app. Reversing
+/// Travel accumulates until it reaches one step. One report moves at most one
+/// app, however far it travelled, and only the part of the travel short of a
+/// further whole step carries over, so a fast flick cannot skip apps. Reversing
 /// direction discards the partial step in the old direction: sensor jitter
 /// around a boundary then cannot make the switcher flutter back and forth,
 /// and walking back takes a full step.
@@ -263,20 +274,20 @@ impl SwitchStepper {
             self.travel = 0;
         }
         self.travel = self.travel.saturating_add(dx);
-        let steps = self.travel / self.step;
-        if steps == 0 {
+        if self.travel.abs() < self.step {
             return None;
         }
-        self.travel -= steps * self.step;
-        let direction = if steps > 0 {
+        let direction = if self.travel > 0 {
             SwitchDirection::Forward
         } else {
             SwitchDirection::Backward
         };
-        let count = u16::try_from(steps.unsigned_abs())
-            .unwrap_or(MAX_STEPS_PER_REPORT)
-            .min(MAX_STEPS_PER_REPORT);
-        Some(SwitchRun { direction, count })
+        // One step per report; whole steps beyond it are dropped.
+        self.travel %= self.step;
+        Some(SwitchRun {
+            direction,
+            count: 1,
+        })
     }
 }
 

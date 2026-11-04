@@ -18,8 +18,8 @@ fn a_step_of_travel_moves_one_app_and_keeps_the_remainder() {
     let mut s = stepper(60);
     assert_eq!(s.motion(59), None);
     assert_eq!(s.motion(1), run(SwitchDirection::Forward, 1));
-    // 130 counts: two steps and 10 carried over.
-    assert_eq!(s.motion(130), run(SwitchDirection::Forward, 2));
+    // 130 counts: one step per report, the remaining 10 carried over.
+    assert_eq!(s.motion(130), run(SwitchDirection::Forward, 1));
     assert_eq!(s.motion(49), None);
     assert_eq!(s.motion(1), run(SwitchDirection::Forward, 1));
 }
@@ -29,7 +29,7 @@ fn leftward_travel_steps_backward() {
     let mut s = stepper(60);
     assert_eq!(s.motion(-59), None);
     assert_eq!(s.motion(-1), run(SwitchDirection::Backward, 1));
-    assert_eq!(s.motion(-120), run(SwitchDirection::Backward, 2));
+    assert_eq!(s.motion(-120), run(SwitchDirection::Backward, 1));
 }
 
 #[test]
@@ -55,12 +55,17 @@ fn zero_motion_is_ignored() {
 }
 
 #[test]
-fn a_glitch_sized_report_is_capped() {
+fn a_fast_report_never_jumps_more_than_one_app() {
     let mut s = stepper(10);
-    assert_eq!(s.motion(i16::MAX), run(SwitchDirection::Forward, 4));
-    assert_eq!(s.motion(i16::MIN), run(SwitchDirection::Backward, 4));
-    // The excess was dropped, not queued for the next report.
+    assert_eq!(s.motion(i16::MAX), run(SwitchDirection::Forward, 1));
+    assert_eq!(s.motion(i16::MIN), run(SwitchDirection::Backward, 1));
+    // The excess whole steps were dropped, not queued for the next report.
     assert_eq!(s.motion(5), None);
+}
+
+#[test]
+fn the_default_step_is_doubled() {
+    assert_eq!(StepPx::DEFAULT.get(), 120);
 }
 
 #[test]
