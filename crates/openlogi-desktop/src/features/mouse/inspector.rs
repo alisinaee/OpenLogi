@@ -25,7 +25,7 @@ use super::thumbwheel::ThumbwheelPreset;
 use super::view::MouseModelView;
 use crate::features::binding_editor::{
     ActionOffer, GESTURE_BUTTON_ICON, PickFn, action_icon_path, action_rows_with,
-    application_editor, command_editor, editor_section, gesture_direction_icon,
+    application_editor, command_editor, dpi_preset_editor, editor_section, gesture_direction_icon,
 };
 use crate::state::{AppOverrides, AppState};
 use crate::ui::action::localized_action_label;
@@ -424,10 +424,7 @@ fn tap_hold_editor(
                 tr!("actions.hold_time"),
                 Slider::new(slider.slider()).horizontal(),
             )
-            .value(
-                format!("{} ms", slider.shown(committed)),
-                ["3000 ms"],
-            )
+            .value(format!("{} ms", slider.shown(committed)), ["3000 ms"])
         }))
         .into_any_element()
 }
@@ -1032,6 +1029,13 @@ fn action_library(
             on_pick,
             pal,
         ))
+        .child(dpi_preset_editor(
+            id_prefix,
+            AppState::try_read(cx).map_or(0, |s| s.dpi_presets().len()),
+            current,
+            on_pick,
+            pal,
+        ))
         .child(editor_section(tr!("actions.actions"), pal))
         .child(control_input(picker.search).cleanable(true))
         .child(
@@ -1190,7 +1194,10 @@ mod tests {
 
         assert_eq!(
             label.as_ref(),
-            format!("tap: Back / hold 500 ms: {}", localized_action_label(&Action::Copy))
+            format!(
+                "tap: Back / hold 500 ms: {}",
+                localized_action_label(&Action::Copy)
+            )
         );
     }
 

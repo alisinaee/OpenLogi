@@ -341,6 +341,64 @@ pub(crate) fn command_editor(
     )
 }
 
+/// The DPI-preset actions a device with `count` presets offers, in preset
+/// order. `Action::SetDpiPreset` holds a zero-based index; the UI shows it
+/// one-based.
+fn dpi_preset_actions(count: usize) -> Vec<Action> {
+    (0..count)
+        .filter_map(|index| u8::try_from(index).ok())
+        .map(Action::SetDpiPreset)
+        .collect()
+}
+
+/// A "DPI Preset" editor listing presets `1..=count`. Renders nothing when the
+/// device has no presets. Clicking a row commits `Action::SetDpiPreset`
+/// through `on_pick`.
+pub(crate) fn dpi_preset_editor(
+    id_prefix: &'static str,
+    count: usize,
+    current: Option<&Action>,
+    on_pick: &PickFn,
+    pal: Palette,
+) -> impl IntoElement {
+    let actions = dpi_preset_actions(count);
+    v_flex().when(!actions.is_empty(), |editor| {
+        editor
+            .child(editor_section(tr!("pointer.dpi_presets"), pal))
+            .children(actions.into_iter().enumerate().map(|(key, action)| {
+                let selected = current == Some(&action);
+                let label = localized_action_label(&action);
+                let on_pick = on_pick.clone();
+                MenuRow::new((id_prefix, key))
+                    .debug_selector(|| format!("{id_prefix}-dpi-preset-{key}"))
+                    .selected(selected)
+                    .role(Role::MenuItem)
+                    .aria_label(label.clone())
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                svg()
+                                    .path(action_icon_path(&action))
+                                    .size_4()
+                                    .flex_none()
+                                    .text_color(pal.text_muted),
+                            )
+                            .child(div().child(label)),
+                    )
+                    .when(selected, |row| {
+                        row.child(
+                            Icon::new(IconName::Check)
+                                .size_3()
+                                .text_color(rgb(ACCENT_BLUE)),
+                        )
+                    })
+                    .on_click(move |_event, window, cx| (on_pick)(action.clone(), window, cx))
+            }))
+    })
+}
+
 /// The action a Run Command field commits, or `None` for a blank command,
 /// which would run nothing.
 fn run_command_action(command: String) -> Option<Action> {
@@ -411,6 +469,19 @@ mod tests {
             .flat_map(|(_, actions)| actions)
             .collect::<Vec<_>>();
         assert!(actions.contains(&Action::ShowActionsRing));
+    }
+
+    #[test]
+    fn dpi_preset_picker_offers_one_action_per_preset() {
+        assert!(dpi_preset_actions(0).is_empty());
+        assert_eq!(
+            dpi_preset_actions(3),
+            vec![
+                Action::SetDpiPreset(0),
+                Action::SetDpiPreset(1),
+                Action::SetDpiPreset(2)
+            ]
+        );
     }
 
     #[test]
