@@ -182,6 +182,7 @@ pub(super) fn general_page(
     );
 
     let group = group
+        .item(capture_mouse_events_item())
         .item(low_battery_notifications_item())
         .item(lock_key_notifications_item());
 
@@ -344,6 +345,20 @@ fn desktop_switcher_size_item(show_desktop_switcher: bool) -> SettingItem {
     )
     .description(tr!("app.desktop_switcher_size_description"))
     .disabled(!show_desktop_switcher)
+}
+
+/// The switch for capturing standard mouse buttons and wheel events with OS hooks.
+fn capture_mouse_events_item() -> SettingItem {
+    SettingItem::new(
+        tr!("app.capture_mouse_events"),
+        SettingField::switch(
+            |cx| AppState::try_read(cx).is_some_and(|s| s.app_settings().capture_mouse_events),
+            |enabled, cx| {
+                AppState::apply(cx, |state| state.commit_capture_mouse_events(enabled));
+            },
+        ),
+    )
+    .description(tr!("app.capture_mouse_events_description"))
 }
 
 /// The switch for the overlay's low-battery notices.

@@ -19,6 +19,7 @@ fn read_only_config_rolls_back_mutations_and_does_not_reload_agent() {
     let _ = state.commit_mouse_profile_target(MouseProfileTarget::Focused);
     let _ = state.commit_lock_key_notifications(false);
     let _ = state.commit_animate_desktop_switch(false);
+    let _ = state.commit_capture_mouse_events(false);
 
     assert_eq!(
         state.app_settings().thumbwheel_sensitivity,
@@ -35,8 +36,39 @@ fn read_only_config_rolls_back_mutations_and_does_not_reload_agent() {
     );
     assert!(state.app_settings().lock_key_notifications);
     assert!(state.app_settings().animate_desktop_switch);
+    assert!(state.app_settings().capture_mouse_events);
     assert_eq!(state.config_issue(), Some("invalid config"));
     assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn capture_mouse_events_persists_and_reloads_only_when_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(openlogi_core::paths::CONFIG_FILE);
+    let (config, file) = ConfigFile::load_from_path(&path).unwrap();
+    let resolver = AssetResolver::new();
+    let (commands, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut state = AppState::new(Sources {
+        persistence: ConfigPersistence::UserFile(file),
+        ..Sources::in_memory(config, &resolver, commands)
+    });
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(crate::services::ipc::Command::LoadConfig(_))
+    ));
+
+    assert!(state.app_settings().capture_mouse_events);
+    let events = state.commit_capture_mouse_events(true);
+    assert_eq!(events, [StateEvent::SettingsChanged]);
+    assert!(receiver.try_recv().is_err(), "already true, no reload");
+
+    let events = state.commit_capture_mouse_events(false);
+    assert_eq!(events, [StateEvent::SettingsChanged]);
+    assert!(!state.app_settings().capture_mouse_events);
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(crate::services::ipc::Command::ReloadConfig(_))
+    ));
 }
 
 #[test]

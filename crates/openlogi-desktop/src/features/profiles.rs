@@ -438,6 +438,11 @@ impl ProfileCommand {
 /// reported that application in this session. The identifier remains the
 /// matching key; only its last human-shaped component is presented.
 fn friendly_app_name(identifier: &str) -> String {
+    match identifier {
+        "company.thebrowser.Browser" => return "Arc".to_string(),
+        "app.zen-browser.zen" => return "Zen".to_string(),
+        _ => {}
+    }
     let path = identifier.strip_prefix("exe:").unwrap_or(identifier);
     // The Windows identifier is the full executable path with no `exe:`
     // prefix (see `openlogi-hook`'s `ForegroundApp::id`), so a path
@@ -477,6 +482,8 @@ mod tests {
     #[test]
     fn profile_identifiers_have_a_readable_fallback() {
         assert_eq!(friendly_app_name("com.google.Chrome"), "Chrome");
+        assert_eq!(friendly_app_name("company.thebrowser.Browser"), "Arc");
+        assert_eq!(friendly_app_name("app.zen-browser.zen"), "Zen");
         assert_eq!(friendly_app_name("exe:C:\\Tools\\Zed.exe"), "Zed");
     }
 

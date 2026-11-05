@@ -59,6 +59,17 @@ impl AppState {
         self.persist_and_reload("show-in-menu-bar setting");
         StateEvent::SettingsChanged.into()
     }
+    /// Toggle whether standard mouse buttons and wheel events are captured
+    /// by OS hooks, and persist it.
+    pub fn commit_capture_mouse_events(&mut self, enabled: bool) -> StateEvents {
+        if self.config.app_settings.capture_mouse_events == enabled {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.capture_mouse_events = enabled);
+        self.persist_and_reload("capture-mouse-events setting");
+        StateEvent::SettingsChanged.into()
+    }
     /// Toggle the opt-in update check and persist it. No immediate side effect
     /// beyond the next launch reading the new value. An already-set value
     /// writes nothing and is still reported.
