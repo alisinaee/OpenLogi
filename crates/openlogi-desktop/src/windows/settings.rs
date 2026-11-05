@@ -69,6 +69,7 @@ mod pinned_apps;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod permissions;
 mod updates;
+mod wheel_playground;
 
 /// Which sidebar page the window opens to. Maps to the page order in
 /// [`SettingsView::render`]; menu items deep-link here (About / Updates).
@@ -88,16 +89,16 @@ impl SettingsPage {
     fn index(self) -> usize {
         match self {
             Self::General => 0,
-            Self::Updates => 1,
+            Self::Updates => 2,
             #[cfg(target_os = "linux")]
-            Self::Permissions => 2,
+            Self::Permissions => 3,
             // One lower on Windows: the Permissions page isn't registered
             // there (see the `mod permissions` cfg).
             Self::About => {
                 if cfg!(any(target_os = "macos", target_os = "linux")) {
-                    6
+                    7
                 } else {
-                    5
+                    6
                 }
             }
         }
@@ -149,6 +150,8 @@ pub struct SettingsView {
     momentum_panel: Entity<MomentumPanel>,
     /// The General page's app switcher Pinned row editor.
     pinned_apps_panel: Entity<pinned_apps::PinnedAppsPanel>,
+    /// The Playground page's scrollable test surface and readout.
+    wheel_surface: Entity<wheel_playground::WheelSurface>,
     /// Shared app-wide updater, surfaced on the Updates page. A launch-time
     /// check result is already visible when the window opens.
     updater: Entity<Updater>,
@@ -246,6 +249,7 @@ impl SettingsView {
 
         let momentum_panel = cx.new(|cx| MomentumPanel::new(MomentumScope::General, cx));
         let pinned_apps_panel = cx.new(|cx| pinned_apps::PinnedAppsPanel::new(window, cx));
+        let wheel_surface = cx.new(|_| wheel_playground::WheelSurface::new());
 
         // Poll the agent's live event monitor while this window is open. The task
         // is held in the view, so closing Settings drops it, polling stops, and
@@ -294,6 +298,7 @@ impl SettingsView {
             wheel_easing_select: Self::wheel_easing_select(window, cx),
             momentum_panel,
             pinned_apps_panel,
+            wheel_surface,
             updater,
             updater_obs,
             copied: false,
@@ -614,6 +619,19 @@ impl Render for SettingsView {
                 self.registration_status,
                 AppState::try_read(cx)
                     .is_none_or(|state| state.app_settings().show_desktop_switcher),
+            ))
+            .page(wheel_playground::wheel_playground_page(
+                self.wheel_surface.clone(),
+                (
+                    self.vertical_scroll_sensitivity.slider().clone(),
+                    self.scroll_entries.vertical_scroll.input().clone(),
+                ),
+                (
+                    self.wheel_duration.slider().clone(),
+                    self.scroll_entries.wheel_duration.input().clone(),
+                ),
+                self.wheel_easing_select.clone(),
+                self.momentum_panel.clone(),
             ))
             .page(updates::updates_page(self.updater.clone()));
         // Registered only where grants exist to manage — see the `mod
