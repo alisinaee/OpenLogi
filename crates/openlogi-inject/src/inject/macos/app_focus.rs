@@ -27,21 +27,29 @@ static WINDOW_ID: LazyLock<Option<WindowIdFn>> = LazyLock::new(|| {
 });
 
 /// Bring the running app with `bundle_id` to the front. `false` when none runs.
+#[expect(
+    deprecated,
+    reason = "ActivateIgnoringOtherApps is necessary to bring background apps forward"
+)]
 pub(crate) fn activate_app(bundle_id: &str) -> bool {
     let id = NSString::from_str(bundle_id);
     let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(&id);
     let Some(app) = apps.firstObject() else {
         return false;
     };
-    app.activateWithOptions(NSApplicationActivationOptions::empty())
+    app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps)
 }
 
 /// Bring window `window_id` of the process `pid` to the front, and its app with it.
+#[expect(
+    deprecated,
+    reason = "ActivateIgnoringOtherApps is necessary to bring background apps forward"
+)]
 pub(crate) fn focus_window(pid: i32, window_id: u32) {
     let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) else {
         return;
     };
-    app.activateWithOptions(NSApplicationActivationOptions::empty());
+    app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
     let Some(window_number) = *WINDOW_ID else {
         return;
     };
