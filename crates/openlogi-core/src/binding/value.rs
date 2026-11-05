@@ -110,6 +110,12 @@ impl LongPressBinding {
     pub const fn long(&self) -> &Action {
         &self.long
     }
+
+    /// The configured hold threshold, if explicitly set.
+    #[must_use]
+    pub const fn hold_threshold(&self) -> Option<HoldThreshold> {
+        self.hold_ms
+    }
 }
 
 /// One button's override inside a per-application profile: a single action,
@@ -283,6 +289,9 @@ impl Binding {
         match self {
             Binding::Single(Action::AppSwitcher) => Some(AppSwitcherParams::default()),
             Binding::AppSwitcher(binding) => Some(binding.params()),
+            Binding::LongPress(binding) if *binding.long() == Action::AppSwitcher => {
+                Some(AppSwitcherParams::new(None, binding.hold_threshold()))
+            }
             Binding::Single(_)
             | Binding::Gesture(_)
             | Binding::LongPress(_)
