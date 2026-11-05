@@ -209,6 +209,9 @@ impl PressBehavior {
         // An app switcher is a tap/hold button like any other long press: the
         // binding owns the pair of actions and the hold time.
         if let Some(params) = binding.app_switcher() {
+            if let Binding::LongPress(binding) = binding {
+                return Self::long_press(binding, pressed_at);
+            }
             return Self::long_press(&params.long_press(), pressed_at);
         }
         match binding {
@@ -456,11 +459,12 @@ impl ButtonState {
 
     fn cancel_pointer_except(&mut self, current: openlogi_hook::PointerTarget) -> Vec<ActivePress> {
         // A lifecycle-only press (a gesture hold) holds no output, and its own
-        // swipe may be what changed the hovered window (Next Desktop). Follow
+        // swipe may be what changed the hovered window (Next Desktop). An app
+        // switcher hold tracks mouse motion sideways across windows. Follow
         // the pointer instead of canceling, so one hold can chain swipes; the
         // press-time focus fallback stays with it.
         for press in self.active.values_mut() {
-            if press.behavior == PressBehavior::LifecycleOnly
+            if (press.behavior == PressBehavior::LifecycleOnly || press.app_switcher.is_some())
                 && let ActionDispatchTarget::Pointer { target, .. } = &mut press.target
             {
                 *target = current;

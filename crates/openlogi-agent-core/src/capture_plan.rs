@@ -307,15 +307,13 @@ pub struct PlanDevice<'a> {
     pub layout: Option<&'a GamingLayout>,
 }
 
-/// Buttons that follow the mouse while held — the app switcher on the DPI
-/// button, which reports travel only as raw XY. They are diverted like
-/// gesture sources whose travel streams instead of swiping.
+/// Buttons that follow the mouse while held — an app switcher button,
+/// which reports travel as raw XY. They are diverted like gesture sources
+/// whose travel streams instead of swiping.
 fn motion_streaming_buttons(bindings: &BTreeMap<ButtonId, Binding>) -> Vec<ButtonId> {
     bindings
-        .get(&ButtonId::DpiToggle)
-        .is_some_and(|binding| binding.app_switcher().is_some())
-        .then_some(ButtonId::DpiToggle)
-        .into_iter()
+        .iter()
+        .filter_map(|(&button, binding)| binding.app_switcher().is_some().then_some(button))
         .collect()
 }
 
@@ -344,15 +342,15 @@ pub fn plan_for_device(
     // target below derives the CIDs to divert from this map's keys).
     let gesture_bindings = hidpp_gesture_maps_for(config, Some(config_key), app);
     let mut divert_gesture_buttons = Vec::new();
+    let motion_buttons = motion_streaming_buttons(&bindings);
     if os_mouse_hook_available {
         divert_gesture_buttons.extend(
             DIVERTABLE_STANDARD_BUTTONS
                 .into_iter()
-                .filter(|(_, button)| side_gesture_bindings.contains_key(button)),
+                .filter(|(_, button)| side_gesture_bindings.contains_key(button) || motion_buttons.contains(button)),
         );
     }
-    let motion_buttons = motion_streaming_buttons(&bindings);
-    if gesture_bindings.contains_key(&ButtonId::DpiToggle) || !motion_buttons.is_empty() {
+    if gesture_bindings.contains_key(&ButtonId::DpiToggle) || motion_buttons.contains(&ButtonId::DpiToggle) {
         divert_gesture_buttons.extend(
             DPI_MODE_SHIFT_CIDS
                 .into_iter()
@@ -431,7 +429,9 @@ pub fn plan_for_device(
                     || thumbwheel_bindings_nondefault,
                 divert_gesture_sources: GESTURE_SOURCE_BUTTONS
                     .into_iter()
-                    .filter(|(_, button)| gesture_bindings.contains_key(button))
+                    .filter(|(_, button)| {
+                        gesture_bindings.contains_key(button) || motion_buttons.contains(button)
+                    })
                     .map(|(cid, _)| cid)
                     .collect(),
                 divert_gesture_buttons,
@@ -1264,6 +1264,29 @@ mod tests {
         cfg.set_binding("2b042", ButtonId::DpiToggle, Binding::Single(Action::Copy));
         let rebound = plan_for_device(&cfg, "2b042", route(), None, 0, false);
         assert!(rebound.target.spec.motion_buttons.is_empty());
+    }
+
+    #[test]
+    fn a_tap_hold_app_switcher_button_streams_raw_xy_travel() {
+        let mut cfg = Config::default();
+        cfg.set_binding(
+            "2b042",
+            ButtonId::DpiToggle,
+            Binding::LongPress(LongPressBinding::new(
+                Action::CycleDpiPresets,
+                Action::AppSwitcher,
+            )),
+        );
+
+        let plan = plan_for_device(&cfg, "2b042", route(), None, 0, false);
+        assert_eq!(plan.target.spec.motion_buttons, [ButtonId::DpiToggle]);
+        assert_eq!(
+            plan.target.spec.divert_gesture_buttons,
+            DPI_MODE_SHIFT_CIDS
+                .into_iter()
+                .map(|cid| (cid, ButtonId::DpiToggle))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

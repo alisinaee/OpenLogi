@@ -481,6 +481,43 @@ fn pointer_change_retargets_a_gesture_hold_instead_of_canceling_it() {
 }
 
 #[test]
+fn pointer_change_retargets_an_app_switcher_hold_instead_of_canceling_it() {
+    use openlogi_hook::PointerTarget;
+    let (sent, received) = mpsc::channel();
+    let mut owner = ButtonRuntimeOwner::spawn(move |event| sent.send(event).expect("receiver"))
+        .expect("worker");
+    let input = owner.input();
+    let old = PointerTarget::Window {
+        process_id: 41,
+        window_id: 7,
+    };
+    let current = PointerTarget::Desktop;
+    let binding = Binding::Single(Action::AppSwitcher);
+    let hold = input
+        .try_hook_down_with_target(
+            ButtonId::DpiToggle,
+            Some(&binding),
+            ActionDispatchTarget::for_pointer(Some(PointerPress::distinct(old)), || None),
+        )
+        .expect("app switcher down");
+    assert!(matches!(
+        recv_event(&received),
+        ButtonRuntimeEvent::Started(_)
+    ));
+    // Moving the mouse across window boundaries while holding the switcher button
+    // must follow the pointer, not cancel the hold.
+    input.cancel_pointer_except(current);
+    assert!(input.try_motion_while_pressed(&hold, 10, 0));
+    let ButtonRuntimeEvent::Motion { press, dx, dy } = recv_event(&received) else {
+        panic!("the switcher hold must survive the pointer change and stream motion");
+    };
+    assert_eq!(press.token(), &hold);
+    assert_eq!(dx, 10);
+    assert_eq!(dy, 0);
+    assert!(owner.shutdown());
+}
+
+#[test]
 fn source_cancellation_invalidates_queued_gesture_work() {
     let (sent, received) = mpsc::channel();
     let mut owner = ButtonRuntimeOwner::spawn(move |event| {
