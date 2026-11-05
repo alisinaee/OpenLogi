@@ -196,30 +196,7 @@ impl SettingsView {
         let updater_obs = cx.observe(&updater, |_, _, cx| cx.notify());
         let installation_obs =
             cx.observe_global::<crate::platform::installation::Installation>(|_, cx| cx.notify());
-        let state_obs = cx.subscribe(&AppState::global(cx), |this, _, event: &StateEvent, cx| {
-            if matches!(event, StateEvent::LanguageChanged) {
-                // The cache-size line is localized text cached in view state
-                // (it interpolates an IO-derived size); rebuild it in the new
-                // locale.
-                this.asset_cache_desc = assets::cache_size_description();
-            }
-            if matches!(
-                event,
-                StateEvent::AgentChanged
-                    | StateEvent::DiagnosticsChanged
-                    | StateEvent::InventoryChanged
-                    | StateEvent::CameraPermissionChanged
-                    | StateEvent::SettingsChanged
-                    | StateEvent::LanguageChanged
-            ) {
-                // A settings change may have run the opportunistic
-                // registration ensure, so re-read the status snapshot.
-                if matches!(event, StateEvent::SettingsChanged) {
-                    this.refresh_registration_status(cx);
-                }
-                cx.notify();
-            }
-        });
+        let state_obs = Self::observe_app_state(cx);
         let activation_obs = Self::observe_registration_status(window, cx);
 
         let theme_search =
@@ -351,6 +328,34 @@ impl SettingsView {
             self.registration_status = status;
             cx.notify();
         }
+    }
+
+    /// Re-render and refresh cached text as the shared app state changes.
+    fn observe_app_state(cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe(&AppState::global(cx), |this, _, event: &StateEvent, cx| {
+            if matches!(event, StateEvent::LanguageChanged) {
+                // The cache-size line is localized text cached in view state
+                // (it interpolates an IO-derived size); rebuild it in the new
+                // locale.
+                this.asset_cache_desc = assets::cache_size_description();
+            }
+            if matches!(
+                event,
+                StateEvent::AgentChanged
+                    | StateEvent::DiagnosticsChanged
+                    | StateEvent::InventoryChanged
+                    | StateEvent::CameraPermissionChanged
+                    | StateEvent::SettingsChanged
+                    | StateEvent::LanguageChanged
+            ) {
+                // A settings change may have run the opportunistic
+                // registration ensure, so re-read the status snapshot.
+                if matches!(event, StateEvent::SettingsChanged) {
+                    this.refresh_registration_status(cx);
+                }
+                cx.notify();
+            }
+        })
     }
 
     fn observe_registration_status(window: &mut Window, cx: &mut Context<Self>) -> Subscription {
