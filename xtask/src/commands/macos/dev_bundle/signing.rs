@@ -81,6 +81,15 @@ pub(super) fn resolve(app: &Path) -> Result<Signing> {
 
     let available = development_identities()?;
     let Some(first) = available.first() else {
+        // No paid Apple certificate: a self-signed local identity in the keychain
+        // gives the same stable designated requirement, so grants survive rebuilds.
+        if let Some(local) = local_identities()?.into_iter().next() {
+            println!(
+                "note: no Apple Development identity found — signing the dev bundle with the \
+                 local certificate \"{local}\" so permission grants survive rebuilds."
+            );
+            return Ok(Signing::Identity(local));
+        }
         println!(
             "note: no Apple Development identity found — signing the dev bundle ad-hoc.\n      \
              Ad-hoc signatures are identified by their hash, so macOS voids the dev\n      \
@@ -131,6 +140,24 @@ fn development_identities() -> Result<Vec<String>> {
         .collect();
     identities.sort_unstable();
     Ok(identities)
+}
+
+/// Self-signed local certificates kept for signing dev builds. Listed without
+/// `-v`: they are not trusted by the chain, but `codesign` signs with them all
+/// the same, and their leaf certificate gives a stable designated requirement.
+fn local_identities() -> Result<Vec<String>> {
+    const LOCAL: [&str; 2] = ["openlogi-dev", "OpenLogi Local Signing"];
+    let sh = Shell::new()?;
+    let Ok(output) = cmd!(sh, "security find-identity -p codesigning").read() else {
+        return Ok(Vec::new());
+    };
+    // Ordered by `LOCAL`, not by `security`'s listing order, so the choice is stable.
+    let found: Vec<String> = output.lines().filter_map(quoted_identity).collect();
+    Ok(LOCAL
+        .iter()
+        .filter(|name| found.iter().any(|identity| identity == *name))
+        .map(|name| (*name).to_owned())
+        .collect())
 }
 
 /// The certificate an already-built bundle carries, if it is readable.
