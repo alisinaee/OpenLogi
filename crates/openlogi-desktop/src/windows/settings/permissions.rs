@@ -52,14 +52,7 @@ pub(super) fn permissions_page(has_camera: bool) -> SettingPage {
                     }
                 },
             ))
-            .item(input_monitoring_item())
-            .item(permission_item(
-                "perm-bluetooth",
-                tr!("permissions.bluetooth"),
-                tr!("permissions.bluetooth_permission_description"),
-                Permission::Bluetooth,
-                |_| permissions::bluetooth(),
-            ));
+            .item(input_monitoring_item());
         // Camera access is only worth asking for once a Logitech webcam is
         // actually connected — it then appears on the main page, and granting
         // access turns on its live preview.
