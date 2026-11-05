@@ -520,12 +520,12 @@ impl WheelState {
     fn gliding(&self) -> Option<&Glide> {
         match &self.glide {
             GlideState::Gliding(glide) => Some(glide),
-            GlideState::Idle { .. } | GlideState::Spent { .. } => None,
+            GlideState::Idle { .. } => None,
         }
     }
 
-    /// End a running glide at `at`, the way `stop` says.
-    fn end_glide(&mut self, at: Instant, stop: GlideStop) {
+    /// End a running glide at `at`, leaving it for the next spin to repeat onto.
+    fn end_glide(&mut self, at: Instant) {
         let GlideState::Gliding(glide) = &self.glide else {
             return;
         };
@@ -534,13 +534,7 @@ impl WheelState {
             direction: glide.direction,
             speed: glide.speed(at),
         };
-        self.glide = match stop {
-            GlideStop::RanOutSpinning => GlideState::Spent {
-                last,
-                next_check: at + FRAME_PERIOD,
-            },
-            GlideStop::Touched | GlideStop::RanOut => GlideState::Idle { last: Some(last) },
-        };
+        self.glide = GlideState::Idle { last: Some(last) };
     }
 }
 
@@ -550,24 +544,18 @@ enum GlideState {
     /// or run out — which the next spin may repeat onto.
     Idle { last: Option<GlideEnd> },
     /// A free-spinning wheel's glide.
-    Gliding(Glide),
-    /// This free spin's glide has run its course; the wheel spinning on must
-    /// not start another. Left when the wheel next leaves free spin, still
-    /// repeatable onto.
     ///
-    /// Its detector is still ticked every frame ([`Self::next_tick`]), so the
-    /// silence of a finger catching the wheel reads as a stop and the next
-    /// stroke scrolls, however slow.
-    Spent { last: GlideEnd, next_check: Instant },
+    /// It follows the wheel while the wheel spins free and only ends once
+    /// the wheel leaves free spin.
+    Gliding(Glide),
 }
 
 impl GlideState {
     /// When the wheel's detector is next due a tick: every frame while it
-    /// glides or its spent spin goes on, never while it is idle.
+    /// glides, never while it is idle.
     fn next_tick(&self) -> Option<Instant> {
         match self {
             Self::Gliding(glide) => Some(glide.next_frame),
-            Self::Spent { next_check, .. } => Some(*next_check),
             Self::Idle { .. } => None,
         }
     }
@@ -577,18 +565,6 @@ impl Default for GlideState {
     fn default() -> Self {
         Self::Idle { last: None }
     }
-}
-
-/// How a glide ended. A spin soon after, the same way, repeats onto it
-/// however it ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GlideStop {
-    /// A finger stopped or turned the wheel.
-    Touched,
-    /// It ran its course with the wheel still spinning free.
-    RanOutSpinning,
-    /// It ran its course after the wheel had gone quiet.
-    RanOut,
 }
 
 /// When, which way and how fast a glide was going as it ended.
@@ -885,10 +861,7 @@ impl ScrollEngine {
         }
         match (phase, &state.glide, direction) {
             (WheelPhase::Ratchet, ..) => {
-                state.end_glide(at, GlideStop::Touched);
-                if let GlideState::Spent { last, .. } = state.glide {
-                    state.glide = GlideState::Idle { last: Some(last) };
-                }
+                state.end_glide(at);
                 self.impulse(source.clone(), impulse, at, emit);
             }
             (WheelPhase::FreeSpin, &GlideState::Idle { last }, Some(direction)) => {
@@ -939,7 +912,7 @@ impl ScrollEngine {
         // A finger catching the wheel to spin again: the next spin may
         // repeat onto this glide.
         if let Some(state) = self.wheels.get_mut(source) {
-            state.end_glide(at, GlideStop::Touched);
+            state.end_glide(at);
         }
         self.drop_motion(source, emit);
     }
@@ -964,7 +937,7 @@ impl ScrollEngine {
     }
 
     /// Emit due glide frames, end the glides that ran their course or whose
-    /// wheel a finger stopped, and watch spent spins for their stop.
+    /// wheel a finger stopped.
     fn advance_glides(&mut self, at: Instant, emit: &mut impl FnMut(ScrollFrame)) {
         let ticking: Vec<ScrollSource> = self
             .wheels
@@ -978,22 +951,6 @@ impl ScrollEngine {
             };
             let momentum = state.momentum;
             let per_tick = momentum.pixels_per_notch();
-            if let GlideState::Spent { last, next_check } = state.glide {
-                if at >= next_check {
-                    state.glide = match state.detector.tick(at) {
-                        WheelPhase::FreeSpin => GlideState::Spent {
-                            last,
-                            next_check: at + FRAME_PERIOD,
-                        },
-                        // Caught or gone quiet: the next movement is a new
-                        // gesture, which may repeat onto the spent glide.
-                        WheelPhase::Stopped(_) | WheelPhase::Ratchet => {
-                            GlideState::Idle { last: Some(last) }
-                        }
-                    };
-                }
-                continue;
-            }
             let phase = state.detector.tick(at);
             let wheel_speed = match phase {
                 WheelPhase::Stopped(_) => {
@@ -1013,24 +970,15 @@ impl ScrollEngine {
             if let Some(frame) = glide.advance(at, per_tick) {
                 emit(frame);
             }
-            // While the spin still speeds up, the glide launches off its
-            // fastest measure rather than the first one; it never rides the
-            // wheel back down.
-            if let Flick::Rising { .. } = glide.flick {
+            glide.flick.follow(wheel_speed, at);
+            if phase == WheelPhase::FreeSpin {
+                // A wheel still spinning free keeps the page gliding at its
+                // pace: the glide never runs out under it.
                 let launch =
                     glide::launch_speed(wheel_speed, glide.sensitivity, &momentum) * glide.boost;
-                if glide::curve(launch, &momentum).start_speed() > glide.curve.start_speed() {
-                    glide.relaunch(launch, &momentum, at);
-                }
-            }
-            glide.flick.follow(wheel_speed, at);
-            if glide.finished(at) {
-                let stop = if phase == WheelPhase::FreeSpin {
-                    GlideStop::RanOutSpinning
-                } else {
-                    GlideStop::RanOut
-                };
-                state.end_glide(at, stop);
+                glide.relaunch(launch, &momentum, at);
+            } else if glide.finished(at) {
+                state.end_glide(at);
             }
         }
     }

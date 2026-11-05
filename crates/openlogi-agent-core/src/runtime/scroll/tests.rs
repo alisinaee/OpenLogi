@@ -1260,9 +1260,9 @@ fn top_glide_speed(frames: &[ScrollFrame]) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// The wheel keeps spinning freely long after the glide it launched: the
-/// glide follows its own curve, not the wheel, and every shape covers about
-/// the same distance.
+/// The wheel keeps spinning freely long after the glide's own length: the
+/// glide follows the wheel, not its curve, so every shape covers about the
+/// same distance.
 #[test]
 fn every_glide_shape_covers_the_same_distance_under_a_spinning_wheel() {
     let mut distances = Vec::new();
@@ -1289,12 +1289,61 @@ fn every_glide_shape_covers_the_same_distance_under_a_spinning_wheel() {
     assert!(high / low < 1.05, "shapes glided apart: {distances:?}");
 }
 
-/// A glide covers its launch speed — the wheel's speed at the release, in
-/// pixels and the user's sensitivity, times the flick response — times the
-/// glide length, plus what it glided while the speed measure was still
-/// rising toward the wheel's speed.
+/// A free spin longer than the glide's length keeps the page gliding through
+/// the whole spin, and a finger stop then ends it within a frame period.
 #[test]
-fn a_glide_covers_its_launch_speed_times_the_glide_length() {
+fn a_free_spin_longer_than_the_glide_never_runs_out_and_a_stop_ends_it() {
+    let mut engine = momentum_engine();
+    let source = hidpp_source("mouse", 1);
+    let mut stopped = Instant::now();
+    // 8 x 500 ms of steady free spin, well past the glide's length: every
+    // segment, the last included, must still glide.
+    for segment in 0..8 {
+        let mut frames = Vec::new();
+        stopped = drive_wheel(
+            &mut engine,
+            &source,
+            stopped,
+            |_| 150.0,
+            Duration::from_millis(500),
+            &mut frames,
+        );
+        let glides = frames.iter().filter(|f| f.kind == FrameKind::Glide).count();
+        assert!(glides > 20, "segment {segment}: only {glides} glide frames");
+    }
+
+    // The wheel falls silent (a finger holds it): the glide ends at once.
+    let mut after = Vec::new();
+    let mut at = stopped;
+    let mut last_glide = None;
+    while at < stopped + Duration::from_millis(400) {
+        engine.advance_due(at, &mut |f| after.push((at, f)));
+        at += Duration::from_millis(1);
+    }
+    for (when, frame) in &after {
+        if frame.kind == FrameKind::Glide {
+            last_glide = Some(*when);
+        }
+    }
+    let ran_past = last_glide.map_or(Duration::ZERO, |l| l.saturating_duration_since(stopped));
+    assert!(
+        ran_past <= Duration::from_millis(50),
+        "glide ran {ran_past:?} past the stop"
+    );
+    assert!(
+        matches!(
+            engine.wheels.get(&source).map(|s| &s.glide),
+            Some(GlideState::Idle { last: Some(_) })
+        ),
+        "the glide did not end"
+    );
+}
+
+/// Under a steady free spin the glide runs at the launch speed — the wheel's
+/// speed in pixels and the user's sensitivity, times the flick response — for
+/// as long as the spin lasts, less what it lost easing up to that speed.
+#[test]
+fn a_glide_under_a_steady_spin_covers_its_launch_speed_times_the_spin() {
     let mut engine = momentum_engine_with(|m| {
         m.max_glide_speed = MomentumScrolling::MAX_GLIDE_SPEED_MAX;
     });
@@ -1317,7 +1366,7 @@ fn a_glide_covers_its_launch_speed_times_the_glide_length() {
     // `drive_wheel` scrolls at 2× sensitivity.
     let launch = glide::launch_speed(120.0, 2.0, &params);
     let glided = glide_pixels(&frames);
-    let (least, most) = (launch * 0.4 * 0.95, launch * (0.4 + 0.15) * 1.05);
+    let (least, most) = (launch * 4.0 * 0.9, launch * 4.0 * 1.05);
     assert!(
         (least..=most).contains(&glided),
         "glided {glided:.0} px, expected {least:.0}–{most:.0}"
@@ -1766,12 +1815,12 @@ fn momentum_steps_stay_out_of_the_thumb_wheels_phased_gesture() {
     assert_eq!(thumb.last(), Some(&SmoothScrollPhase::Ended));
 }
 
-/// A glide runs out while the wheel still spins freely; a finger then
-/// catches the wheel and scrolls on slowly the same way. The silence of the
-/// catch must still read as a stop, so those slow strokes scroll instead of
-/// being swallowed as more of the spent spin.
+/// A wheel spins freely well past the glide's length, still gliding; a finger
+/// then catches it and scrolls on slowly the same way. The silence of the
+/// catch must read as a stop, so those slow strokes scroll instead of being
+/// swallowed as more of the spin.
 #[test]
-fn slow_strokes_after_a_spent_glide_and_a_catch_still_scroll() {
+fn slow_strokes_after_a_long_spin_and_a_catch_still_scroll() {
     let mut engine = momentum_engine();
     let source = hidpp_source("mouse", 1);
     let mut frames = Vec::new();
@@ -1787,9 +1836,9 @@ fn slow_strokes_after_a_spent_glide_and_a_catch_still_scroll() {
     assert!(
         matches!(
             engine.wheels.get(&source).map(|s| &s.glide),
-            Some(GlideState::Spent { .. })
+            Some(GlideState::Gliding(_))
         ),
-        "the glide did not run out under the spinning wheel"
+        "the glide did not keep following the spinning wheel"
     );
     // The finger holds the wheel still for 150 ms…
     let resumed = run_on(&mut engine, caught, Duration::from_millis(150), &mut frames);
