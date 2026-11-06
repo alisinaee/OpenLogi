@@ -118,12 +118,16 @@ pub fn configure_application() {
 #[cfg(target_os = "macos")]
 pub fn configure_windows() {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSPanel, NSWindowStyleMask};
+    use objc2_app_kit::{NSApplication, NSPanel, NSWindowCollectionBehavior, NSWindowStyleMask};
 
     if let Some(marker) = MainThreadMarker::new() {
         for window in NSApplication::sharedApplication(marker).windows() {
             window.setStyleMask(NSWindowStyleMask::NonactivatingPanel);
             window.setHasShadow(false);
+            window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            );
             if let Some(panel) = window.downcast_ref::<NSPanel>() {
                 panel.setBecomesKeyOnlyIfNeeded(true);
             }
