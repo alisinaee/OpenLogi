@@ -2,9 +2,8 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -39,6 +38,9 @@ pub struct ScrollPreferences {
     /// The smoothed-wheel feel, packed by [`pack_feel`]; independent of the
     /// byte above because the worker applies it only to segments it starts.
     feel: AtomicU32,
+    /// Whether the app in front takes one fixed step per wheel event, so the
+    /// speed must be sent as the number of events. See [`NotchAccumulator`].
+    notch_output: AtomicBool,
 }
 
 impl ScrollPreferences {
@@ -48,7 +50,19 @@ impl ScrollPreferences {
         Self {
             encoded: AtomicU8::new(Self::encode(smooth_scroll, vertical_sensitivity)),
             feel: AtomicU32::new(pack_feel(WheelFeel::default())),
+            notch_output: AtomicBool::new(false),
         }
+    }
+
+    /// Publish whether the app in front needs whole-notch output.
+    pub fn publish_notch_output(&self, notch_output: bool) {
+        self.notch_output.store(notch_output, Ordering::Relaxed);
+    }
+
+    /// Whether the app in front needs whole-notch output.
+    #[must_use]
+    pub fn notch_output(&self) -> bool {
+        self.notch_output.load(Ordering::Relaxed)
     }
 
     /// Publish both settings as one snapshot.
@@ -286,9 +300,58 @@ pub struct ScrollInputHandle {
     generation: Arc<AtomicU64>,
     accepting: Arc<AtomicBool>,
     preferences: Arc<ScrollPreferences>,
+    notch: Arc<Mutex<NotchAccumulator>>,
 }
 
+/// Turns scaled wheel distances into whole notches for an app that takes one
+/// fixed step per wheel event whatever the event's size (RustDesk does). The
+/// speed then shows up as how many events arrive: fractions are kept until
+/// they add up to a notch, and a whole notch is one event.
+#[derive(Default)]
+pub(crate) struct NotchAccumulator {
+    residual: f64,
+}
+
+impl NotchAccumulator {
+    /// Add one scaled distance in notches and return the whole notches now due
+    /// (signed, integral), keeping the fraction for later.
+    pub(crate) fn push(&mut self, notches: f64) -> f64 {
+        self.residual += notches;
+        let due = self.residual.trunc();
+        self.residual -= due;
+        due
+    }
+}
+
+/// Most events one input posts in whole notches. A fast flick at a high speed
+/// can come in as one large distance; the rest of it is dropped, not queued.
+const MAX_NOTCHES_PER_INPUT: u32 = 16;
+
 impl ScrollInputHandle {
+    /// Post the whole notches `notches` adds up to, one event per notch, as
+    /// direct output. Returns `false` only when an event could not be queued.
+    fn notch_scroll(&self, source: &ScrollSource, notches: f64) -> bool {
+        let due = match self.notch.lock() {
+            Ok(mut accumulator) => accumulator.push(notches),
+            Err(_) => return false,
+        };
+        let step = if due < 0.0 { -1.0 } else { 1.0 };
+        let mut remaining = due.abs();
+        let mut queued = true;
+        for _ in 0..MAX_NOTCHES_PER_INPUT {
+            if remaining < 1.0 {
+                break;
+            }
+            queued &= self.try_enqueue(
+                source.clone(),
+                WheelDelta { x: 0.0, y: step },
+                ScrollOutputMode::Direct,
+            );
+            remaining -= 1.0;
+        }
+        queued
+    }
+
     /// Queue one ordinary wheel impulse from the current OS-hook thread.
     ///
     /// Pixel input, zero/non-finite distance, a full queue, or an unavailable
@@ -309,6 +372,18 @@ impl ScrollInputHandle {
         else {
             return false;
         };
+        // Scroll debug trace: shown only at debug level (OPENLOGI_LOG=debug).
+        tracing::debug!(
+            target: "openlogi_scroll_debug",
+            raw_y = impulse.y,
+            scaled_y = scaled.y,
+            multiplier = preferences.vertical_sensitivity.scroll_multiplier(),
+            smooth = preferences.smooth_scroll,
+            "hook wheel scroll"
+        );
+        if scaled.y != 0.0 && self.preferences.notch_output() {
+            return self.notch_scroll(&ScrollSource::current_hook(), scaled.y);
+        }
         let output = if preferences.smooth_scroll {
             ScrollOutputMode::Smooth { at: Instant::now() }
         } else if scaled != impulse {
@@ -374,9 +449,24 @@ impl ScrollInputHandle {
             return Err(delta);
         };
         let multiplier = self.preferences.vertical_sensitivity().scroll_multiplier();
+        // Scroll debug trace: shown only at debug level (OPENLOGI_LOG=debug).
+        tracing::debug!(
+            target: "openlogi_scroll_debug",
+            raw_y = impulse.y,
+            multiplier,
+            "hid++ main wheel scroll"
+        );
         let Some(scaled) = impulse.with_vertical_scale(multiplier) else {
             return Err(delta);
         };
+        if scaled.y != 0.0 && self.preferences.notch_output() {
+            let source = ScrollSource::Hidpp(session.clone(), HidppWheel::Main);
+            return if self.notch_scroll(&source, scaled.y) {
+                Ok(())
+            } else {
+                Err(scaled.into())
+            };
+        }
         let queued = self.accepting.load(Ordering::Acquire)
             && self.try_enqueue(
                 ScrollSource::Hidpp(session.clone(), HidppWheel::Main),
@@ -485,6 +575,7 @@ impl ScrollRuntime {
             generation: Arc::clone(&generation),
             accepting: Arc::new(AtomicBool::new(true)),
             preferences: Arc::clone(&preferences),
+            notch: Arc::new(Mutex::new(NotchAccumulator::default())),
         };
         let worker = thread::Builder::new()
             .name("openlogi-scroll".into())
@@ -709,6 +800,7 @@ mod tests {
                 generation: Arc::new(AtomicU64::new(0)),
                 accepting: Arc::new(AtomicBool::new(true)),
                 preferences,
+                notch: Arc::new(Mutex::new(NotchAccumulator::default())),
             },
             receiver,
             control_rx,
@@ -1584,5 +1676,45 @@ mod tests {
             assert_eq!(phase, openlogi_inject::SmoothScrollPhase::Changed);
         }
         runtime.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod notch_accumulator_tests {
+    use super::NotchAccumulator;
+
+    #[test]
+    fn fractions_add_up_to_one_notch_before_anything_is_posted() {
+        let mut notches = NotchAccumulator::default();
+        assert_eq!(notches.push(0.25), 0.0);
+        assert_eq!(notches.push(0.25), 0.0);
+        assert_eq!(notches.push(0.25), 0.0);
+        assert_eq!(notches.push(0.25), 1.0);
+    }
+
+    #[test]
+    fn a_large_distance_is_whole_notches_and_keeps_the_fraction() {
+        let mut notches = NotchAccumulator::default();
+        assert_eq!(notches.push(2.5), 2.0);
+        assert_eq!(notches.push(0.5), 1.0);
+        assert_eq!(notches.push(0.0), 0.0);
+    }
+
+    #[test]
+    fn a_negative_distance_posts_negative_notches() {
+        let mut notches = NotchAccumulator::default();
+        assert_eq!(notches.push(-2.5), -2.0);
+        assert_eq!(notches.push(-0.5), -1.0);
+        assert_eq!(notches.push(-0.25), 0.0);
+    }
+
+    #[test]
+    fn a_slow_speed_posts_fewer_notches_than_a_fast_one() {
+        let mut slow = NotchAccumulator::default();
+        let mut fast = NotchAccumulator::default();
+        let slow_total: f64 = (0..10).map(|_| slow.push(0.25)).sum();
+        let fast_total: f64 = (0..10).map(|_| fast.push(2.0)).sum();
+        assert_eq!(slow_total, 2.0);
+        assert_eq!(fast_total, 20.0);
     }
 }

@@ -15,6 +15,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
 use openlogi_core::app::ForegroundApp;
+
+/// Applications whose wheel handling takes one fixed step per event whatever
+/// the event's size. For these the wheel speed is sent as the number of
+/// events (see `NotchAccumulator` in the scroll worker): RustDesk's remote
+/// wheel ignores the size of each event (`onPointerSignalImage` in its
+/// `input_model.dart`).
+const NOTCH_OUTPUT_APPS: &[&str] = &["com.carriez.rustdesk"];
+
 use openlogi_core::binding::{
     ActionRingIcon, Binding, ButtonId, GamingButtons, GamingLayout, GridKey, KeypadPage,
 };
@@ -2076,6 +2084,33 @@ impl Orchestrator {
         )
     }
 
+    /// Publish the scroll preferences the input hook reads: smoothing on or
+    /// off, and the main-wheel speed of the application in front, which
+    /// replaces the global speed while that application is in front.
+    fn publish_scroll_preferences(&self) {
+        // The app the wheel is over (the pointer's window, like button profiles),
+        // or the focused app when the setting says so. Hover alone is enough.
+        let app = self.mouse_context().0;
+        let sensitivity = match app {
+            Some(app) => self.config.app_vertical_scroll_sensitivity(app),
+            None => self.config.app_settings.vertical_scroll_sensitivity,
+        };
+        // Scroll debug trace: shown only at debug level (OPENLOGI_LOG=debug).
+        tracing::debug!(
+            target: "openlogi_scroll_debug",
+            front_app = ?app,
+            sensitivity = u8::from(sensitivity),
+            "scroll preferences published"
+        );
+        self.shared
+            .scroll_preferences
+            .publish(self.config.app_settings.smooth_scroll, sensitivity);
+        let notch_output = app.is_some_and(|app| NOTCH_OUTPUT_APPS.contains(&app));
+        self.shared
+            .scroll_preferences
+            .publish_notch_output(notch_output);
+    }
+
     /// Foreground-app change → re-overlay per-app bindings on the hook maps and
     /// republish the capture plans, whose binding maps and divert sets are
     /// per-app effective too (HID++ dispatch reads them at event time). Both
@@ -2104,6 +2139,7 @@ impl Orchestrator {
             return false;
         }
         let previous = std::mem::replace(&mut self.current_app, id);
+        self.publish_scroll_preferences();
         self.publish_switcher_inputs();
         self.publish_hook_maps(self.hook_maps_for(self.current_key()));
         // Capture plans are app-scoped (per-app binding overlays); republish
@@ -2132,6 +2168,9 @@ impl Orchestrator {
         }
         let previous = self.mouse_context().1;
         self.pointer_context = context;
+        // The wheel speed follows the app under the pointer too, so republish
+        // it whenever the pointer moves to another window.
+        self.publish_scroll_preferences();
         if self.config.app_settings.mouse_profile_target == MouseProfileTarget::Focused {
             return false;
         }
@@ -2196,10 +2235,7 @@ impl Orchestrator {
         self.forget_saved_light_changes(&previous, source);
         // Parameter-only edits must not erase a transient manual choice while
         // the light remains camera-linked. Changing the policy invalidates it.
-        self.shared.scroll_preferences.publish(
-            self.config.app_settings.smooth_scroll,
-            self.config.app_settings.vertical_scroll_sensitivity,
-        );
+        self.publish_scroll_preferences();
         self.shared
             .scroll_preferences
             .publish_wheel_feel(self.config.app_settings.wheel_feel());

@@ -582,7 +582,16 @@ pub fn start(
                     // ticks. A native horizontal tick therefore comes from
                     // another source, such as a touchpad pan or RDP input
                     // (#2242, #1708), which the hook cannot attribute.
-                    if scroll_source_may_intercept(from_trackpad, device.as_ref()) {
+                    // Scroll debug trace: shown only at debug level (OPENLOGI_LOG=debug).
+                    let may_intercept = scroll_source_may_intercept(from_trackpad, device.as_ref());
+                    tracing::debug!(
+                        target: "openlogi_scroll_debug",
+                        from_trackpad,
+                        device_attributed = device.is_some(),
+                        may_intercept,
+                        "wheel event seen by hook"
+                    );
+                    if may_intercept {
                         return queued_event_disposition(scroll.try_hook_scroll(delta));
                     }
                     EventDisposition::PassThrough
