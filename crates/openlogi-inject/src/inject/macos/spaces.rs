@@ -10,6 +10,7 @@
 //! three-finger swipe (see [`crate::inject::space_switch::slide`]).
 //! No Dock injection, cursor warp, focus click, or symbolic-hotkey mutation.
 
+use std::collections::BTreeMap;
 use std::ffi::{c_int, c_void};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -32,6 +33,8 @@ use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSObjectProtocol, NSProcessInfo, NSUserDefaults,
     ns_string,
 };
+
+use openlogi_core::desktop_schema::DesktopSchema;
 
 use super::super::space_switch::{
     self, Backend, Direction, Failure, Lease, Pace, Pending, PostGate, Roll, SlideFrame,
@@ -96,6 +99,12 @@ fn report(display: u32, state: &SpaceState) {
         tracing::debug!("desktop report superseded by a newer switch");
         return;
     }
+    if let Some(schema) = &schema {
+        LAST_SCHEMA
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(display, schema.clone());
+    }
     observer(DesktopPosition {
         count,
         current,
@@ -103,9 +112,26 @@ fn report(display: u32, state: &SpaceState) {
     });
 }
 
-/// Tell the observer a position at once, without the desktops' windows. It
-/// supersedes any slower report still reading them.
-fn report_position(count: u16, current: u16) {
+/// The last map each display's full report carried. A position reported at
+/// once reuses its display's map, so the switcher keeps its thumbnails while
+/// the switch is still sliding, on every display, instead of flashing plain
+/// boxes after a move to another display.
+static LAST_SCHEMA: Mutex<BTreeMap<u32, DesktopSchema>> = Mutex::new(BTreeMap::new());
+
+/// The cached map of `display`, when it still describes `count` desktops.
+fn cached_schema(display: u32, count: u16) -> Option<DesktopSchema> {
+    LAST_SCHEMA
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&display)
+        .filter(|schema| schema.spaces.len() == usize::from(count))
+        .cloned()
+}
+
+/// Tell the observer a position at once, reusing the last map of `display`
+/// when it still fits. It supersedes any slower report still reading the
+/// desktops' windows.
+fn report_position(display: u32, count: u16, current: u16) {
     let observer = OBSERVER
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -117,7 +143,7 @@ fn report_position(count: u16, current: u16) {
     observer(DesktopPosition {
         count,
         current,
-        schema: None,
+        schema: cached_schema(display, count),
     });
 }
 
@@ -164,6 +190,17 @@ fn start(direction: Direction) {
     begin(direction, lease);
 }
 
+/// Where `state` will be after one step in `direction`, counted as
+/// [`SpaceState::position`] counts it. A step past the first or last Space
+/// stays put; an unusable list predicts nothing.
+fn predicted_position(state: &SpaceState, direction: Direction) -> Option<(u16, u16)> {
+    let mut next = state.clone();
+    if let Some(id) = state.target(direction).ok()? {
+        next.current = id;
+    }
+    next.position()
+}
+
 /// Run one switch holding `lease`, then hand the lease to the next queued
 /// step at once (no wait between the steps of a roll) or release it.
 fn begin(direction: Direction, lease: Lease<'static>) {
@@ -180,8 +217,20 @@ fn begin(direction: Direction, lease: Lease<'static>) {
     *roll() = None;
     let result = space_switch::spawn_ordered(move |gate| {
         let mut landed = false;
+        // The position before the switch, kept for a switch that fails.
+        let mut before = None;
         let reported = autoreleasepool(|_| {
             let result = Native::new(display_id, switch).and_then(|mut native| {
+                // Announce where the switch is going before it slides. The
+                // notice would otherwise lapse mid-slide, and the overlay would
+                // close and reopen its window (see `predicted_position`).
+                let state = native.state();
+                if let Ok(state) = &state
+                    && let Some((count, current)) = predicted_position(state, direction)
+                {
+                    report_position(display_id, count, current);
+                }
+                before = state.ok();
                 let outcome = space_switch::run(&mut native, direction, gate)?;
                 // The position the switch ended on. A failed read only
                 // costs the switcher: the switch itself is confirmed.
@@ -206,6 +255,11 @@ fn begin(direction: Direction, lease: Lease<'static>) {
                         ?error,
                         "Space switch unconfirmed — no retry"
                     );
+                    // The switch did not happen: put back the position it
+                    // was announced from.
+                    if let Some((count, current)) = before.as_ref().and_then(SpaceState::position) {
+                        report_position(display_id, count, current);
+                    }
                     None
                 }
             }
@@ -316,7 +370,7 @@ fn instant_step(display_id: u32, direction: Direction, gate: PostGate) {
         }
         Ok(Step::Boundary) => {
             if let Some((count, current)) = roll.position() {
-                report_position(count, current);
+                report_position(display_id, count, current);
             }
             tracing::debug!(display_id, ?direction, "Space switch at the edge");
             return;
@@ -338,7 +392,7 @@ fn instant_step(display_id: u32, direction: Direction, gate: PostGate) {
     let stamp = STEPS.fetch_add(1, Ordering::SeqCst) + 1;
     drop(plan);
     if let Some((count, current)) = position {
-        report_position(count, current);
+        report_position(display_id, count, current);
     }
     settler().send(Settle {
         display_id,

@@ -14,6 +14,7 @@ use crate::binding::ButtonId;
 use crate::color::Rgb;
 use crate::device::ChangedOnLight;
 use crate::hid::{SmartShiftAutoDisengage, SmartShiftThreshold, TunableTorque};
+use crate::switcher_rows::SwitcherRowRules;
 use crate::update_feed::UpdateChannel;
 
 /// Light/dark appearance preference. `System` follows the OS appearance (the
@@ -332,6 +333,11 @@ pub struct AppSettings {
     /// [`MAX_PINNED`](crate::switcher_rows::MAX_PINNED) are used.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_apps: Vec<String>,
+    /// Per-row settings of the app switcher: which rows show, and which apps
+    /// each row (and all of them, via `never_show`) leaves out. Defaults show
+    /// every row with no filter.
+    #[serde(default, skip_serializing_if = "SwitcherRowRules::is_default")]
+    pub app_switcher_rules: SwitcherRowRules,
     /// Whether macOS may accelerate OpenLogi's smoothed wheel output, so a fast
     /// spin scrolls farther per notch than a slow one. **On by default**
     /// (today's behaviour: a smoothed wheel is posted as wheel ticks, which
@@ -374,11 +380,21 @@ pub enum DesktopSwitcherSize {
     Medium,
     /// Thirteen tenths of the standard size.
     Large,
+    /// Sixteen tenths of the standard size. Appended after the first three.
+    ExtraLarge,
+    /// Two times the standard size. Appended after the first three.
+    Maximum,
 }
 
 impl DesktopSwitcherSize {
-    /// Every size, in the order Settings offers them.
-    pub const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+    /// Every size, smallest first, in the order Settings offers them.
+    pub const ALL: [Self; 5] = [
+        Self::Small,
+        Self::Medium,
+        Self::Large,
+        Self::ExtraLarge,
+        Self::Maximum,
+    ];
 
     /// The factor the overlay scales the switcher by. The one place this
     /// mapping lives.
@@ -388,6 +404,8 @@ impl DesktopSwitcherSize {
             Self::Small => 0.8,
             Self::Medium => 1.0,
             Self::Large => 1.3,
+            Self::ExtraLarge => 1.6,
+            Self::Maximum => 2.0,
         }
     }
 
@@ -690,6 +708,7 @@ impl Default for AppSettings {
             desktop_switcher_size: DesktopSwitcherSize::default(),
             desktop_switcher_show_apps: true,
             pinned_apps: Vec::new(),
+            app_switcher_rules: SwitcherRowRules::default(),
         }
     }
 }

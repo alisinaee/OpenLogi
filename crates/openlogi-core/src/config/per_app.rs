@@ -24,11 +24,20 @@ impl Config {
         overlay_for(&device.per_app_settings, &self.apps, app)
     }
 
+    /// The sensor DPI `app` sets while in front, when its entry stores one.
+    #[must_use]
+    pub fn app_dpi(&self, device_key: &str, app: &str) -> Option<crate::hid::Dpi> {
+        self.app_device_settings(device_key, app)?.dpi
+    }
+
     /// The main-wheel vertical scroll sensitivity while `app` is in front: its
     /// own [`Self::app_wheel_speed`] entry when it has one, else the global
     /// [`AppSettings::vertical_scroll_sensitivity`](super::AppSettings::vertical_scroll_sensitivity).
     #[must_use]
-    pub fn app_vertical_scroll_sensitivity(&self, app: &str) -> super::settings::VerticalScrollSensitivity {
+    pub fn app_vertical_scroll_sensitivity(
+        &self,
+        app: &str,
+    ) -> super::settings::VerticalScrollSensitivity {
         overlay_for(&self.app_wheel_speed, &self.apps, app)
             .copied()
             .unwrap_or(self.app_settings.vertical_scroll_sensitivity)

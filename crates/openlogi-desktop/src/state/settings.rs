@@ -10,7 +10,7 @@ use openlogi_core::config::{
     MomentumScrolling, MouseProfileTarget, ThumbwheelSensitivity, UiScale,
     VerticalScrollSensitivity, WheelEasing, WheelFeel,
 };
-use openlogi_core::switcher_rows::MAX_PINNED;
+use openlogi_core::switcher_rows::{MAX_PINNED, SwitcherRowRules};
 use openlogi_core::update_feed::UpdateChannel;
 
 impl AppState {
@@ -500,6 +500,32 @@ impl AppState {
         self.persist_and_reload("pinned apps setting");
         StateEvent::SettingsChanged.into()
     }
+    /// Replace the app switcher's per-row rules and persist them. Each list is
+    /// stripped of blank and duplicate identifiers, so the stored rules are
+    /// what the switcher applies. The agent reads them on config reload. Unchanged
+    /// rules write nothing and are still reported.
+    pub fn commit_app_switcher_rules(&mut self, mut rules: SwitcherRowRules) -> StateEvents {
+        for list in [
+            &mut rules.windows.allow,
+            &mut rules.windows.block,
+            &mut rules.pinned.allow,
+            &mut rules.pinned.block,
+            &mut rules.recent.allow,
+            &mut rules.recent.block,
+            &mut rules.most_used.allow,
+            &mut rules.most_used.block,
+            &mut rules.never_show,
+        ] {
+            dedup_ids(list);
+        }
+        if self.config.app_settings.app_switcher_rules == rules {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config
+            .edit(|config| config.app_settings.app_switcher_rules = rules);
+        self.persist_and_reload("app switcher rules setting");
+        StateEvent::SettingsChanged.into()
+    }
     /// Toggle macOS acceleration of the smoothed wheel and persist it. The
     /// agent reads the new value on config reload. An already-set value
     /// writes nothing and is still reported; disk failures restore the
@@ -563,12 +589,9 @@ impl AppState {
     pub fn current_app_wheel_speed(&self) -> Option<(VerticalScrollSensitivity, bool)> {
         let app = self.editing_app()?;
         let speed = self.config.app_vertical_scroll_sensitivity(app);
-        let own = openlogi_core::app::overlay_for(
-            &self.config.app_wheel_speed,
-            &self.config.apps,
-            app,
-        )
-        .is_some();
+        let own =
+            openlogi_core::app::overlay_for(&self.config.app_wheel_speed, &self.config.apps, app)
+                .is_some();
         Some((speed, own))
     }
 
@@ -584,6 +607,70 @@ impl AppState {
         self.config
             .edit(|config| config.set_app_wheel_speed(&app, speed));
         self.persist_and_reload("app wheel speed");
+        StateEvent::SettingsChanged.into()
+    }
+    /// The open application profile's own sensor DPI for the selected device,
+    /// with the DPI it follows otherwise as the first value and whether the
+    /// profile sets its own as the second. `None` outside an application profile.
+    #[must_use]
+    pub fn current_app_device_dpi(&self) -> Option<(openlogi_core::hid::Dpi, bool)> {
+        let app = self.editing_app()?;
+        let key = self
+            .current_record()
+            .and_then(crate::state::devices::DeviceRecord::persistent_config_key)?;
+        let own = self
+            .config
+            .devices
+            .get(key)
+            .and_then(|device| device.per_app_settings.get(app))
+            .and_then(|settings| settings.dpi);
+        Some(own.map_or((self.dpi_for_current(), false), |dpi| (dpi, true)))
+    }
+
+    /// Sets (or, with `None`, clears) the open application profile's DPI on the
+    /// selected device, snapped to a value the device supports. No-op outside
+    /// an application profile or without a persistent device key.
+    pub fn commit_current_app_dpi(&mut self, dpi: Option<openlogi_core::hid::Dpi>) -> StateEvents {
+        let target = self.editing_app().and_then(|app| {
+            let key = self
+                .current_record()
+                .and_then(crate::state::devices::DeviceRecord::persistent_config_key)?;
+            Some((key.to_string(), app.to_string()))
+        });
+        let Some((key, app)) = target else {
+            return StateEvent::SettingsChanged.into();
+        };
+        let dpi = dpi.map(|dpi| self.normalize_active_dpi(dpi));
+        self.commit_app_device_dpi(&key, &app, dpi)
+    }
+
+    /// Sets (or, with `None`, clears) the sensor DPI `app` uses on the device
+    /// stored under `device_key`. An application entry left with no override
+    /// is removed.
+    pub fn commit_app_device_dpi(
+        &mut self,
+        device_key: &str,
+        app: &str,
+        dpi: Option<openlogi_core::hid::Dpi>,
+    ) -> StateEvents {
+        let current = self
+            .config
+            .devices
+            .get(device_key)
+            .and_then(|device| device.per_app_settings.get(app))
+            .and_then(|settings| settings.dpi);
+        if current == dpi {
+            return StateEvent::SettingsChanged.into();
+        }
+        self.config.edit(|config| {
+            let device = config.devices.entry(device_key.to_string()).or_default();
+            let settings = device.per_app_settings.entry(app.to_string()).or_default();
+            settings.dpi = dpi;
+            if *settings == Default::default() {
+                device.per_app_settings.remove(app);
+            }
+        });
+        self.persist_and_reload("app DPI");
         StateEvent::SettingsChanged.into()
     }
     pub fn commit_auto_download_assets(&mut self, enabled: bool) -> StateEvents {
@@ -641,5 +728,34 @@ impl AppState {
         self.persist_and_reload("language setting");
         openlogi_core::locale::activate(self.config.app_settings.language.as_deref());
         StateEvents::from(StateEvent::LanguageChanged).and(StateEvent::SettingsChanged)
+    }
+}
+
+/// Drop blank and repeated identifiers from `ids`, keeping the first of each.
+fn dedup_ids(ids: &mut Vec<String>) {
+    let mut seen: Vec<String> = Vec::with_capacity(ids.len());
+    for id in ids.drain(..) {
+        if !id.trim().is_empty() && !seen.contains(&id) {
+            seen.push(id);
+        }
+    }
+    *ids = seen;
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::dedup_ids;
+
+    #[test]
+    fn dedup_keeps_first_and_drops_blank_and_repeats() {
+        let mut ids = vec![
+            "a".to_owned(),
+            "  ".to_owned(),
+            "b".to_owned(),
+            "a".to_owned(),
+            String::new(),
+        ];
+        dedup_ids(&mut ids);
+        assert_eq!(ids, ["a", "b"]);
     }
 }

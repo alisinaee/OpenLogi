@@ -21,7 +21,7 @@ fn recent_is_most_recent_first_without_duplicates_or_frontmost() {
     for id in ["a", "b", "c", "a"] {
         usage.record(&app(id));
     }
-    let rows = usage.rows(&[], &[], Some("a"));
+    let rows = usage.rows(&SwitcherRowRules::default(), &[], &[], Some("a"));
     assert_eq!(ids(&rows.recent), ["c", "b"]);
 }
 
@@ -31,7 +31,7 @@ fn most_used_ranks_by_count_then_recency() {
     for id in ["a", "b", "b", "c", "c", "a", "d"] {
         usage.record(&app(id));
     }
-    let rows = usage.rows(&[], &[], None);
+    let rows = usage.rows(&SwitcherRowRules::default(), &[], &[], None);
     assert_eq!(ids(&rows.most_used), ["a", "c", "b", "d"]);
     assert_eq!(usage.count("c"), 2);
 }
@@ -45,7 +45,7 @@ fn history_is_bounded() {
     usage.record(&app("app0"));
     assert!(usage.counts.len() <= MAX_TRACKED);
     assert!(usage.recent.len() <= MAX_RECENT);
-    let rows = usage.rows(&[], &[], None);
+    let rows = usage.rows(&SwitcherRowRules::default(), &[], &[], None);
     assert!(rows.most_used.len() <= MAX_ROW_LEN);
 }
 
@@ -54,7 +54,12 @@ fn pinned_keeps_order_dedupes_and_marks_open() {
     let mut usage = AppUsage::default();
     usage.record(&app("mail"));
     let pinned = ["mail".to_owned(), "notes".into(), "mail".into()];
-    let rows = usage.rows(&pinned, &["notes".into()], None);
+    let rows = usage.rows(
+        &SwitcherRowRules::default(),
+        &pinned,
+        &["notes".into()],
+        None,
+    );
     assert_eq!(ids(&rows.pinned), ["mail", "notes"]);
     assert_eq!(rows.pinned[0].app.display_name, "MAIL");
     assert_eq!(rows.pinned[0].activation(), Activation::Launch);
@@ -136,7 +141,7 @@ fn the_view_selects_the_entry_under_the_cursor() {
     let mut usage = AppUsage::default();
     usage.record(&app("a"));
     usage.record(&app("b"));
-    let rows = usage.rows(&["p".to_owned()], &[], None);
+    let rows = usage.rows(&SwitcherRowRules::default(), &["p".to_owned()], &[], None);
     let mut view = SwitcherView::new(
         vec![window(1, "one"), window(2, "two")],
         rows,
@@ -170,7 +175,7 @@ fn the_windows_row_is_bounded() {
 fn the_selection_moves_with_the_cursor_and_reports_motion() {
     let mut usage = AppUsage::default();
     usage.record(&app("a"));
-    let rows = usage.rows(&[], &[], None);
+    let rows = usage.rows(&SwitcherRowRules::default(), &[], &[], None);
     let view = SwitcherView::new(
         vec![window(1, "one"), window(2, "two")],
         rows,
@@ -195,4 +200,79 @@ fn the_selection_moves_with_the_cursor_and_reports_motion() {
         Some(Selection::Window(&window(2, "two"))),
         "the windows row remembers its column"
     );
+}
+
+fn rules_with(f: impl FnOnce(&mut SwitcherRowRules)) -> SwitcherRowRules {
+    let mut rules = SwitcherRowRules::default();
+    f(&mut rules);
+    rules
+}
+
+#[test]
+fn disabled_row_is_empty() {
+    let mut usage = AppUsage::default();
+    usage.record(&app("a"));
+    usage.record(&app("b"));
+    let rules = rules_with(|r| r.recent.enabled = false);
+    let rows = usage.rows(&rules, &["p".to_owned()], &[], None);
+    assert!(rows.recent.is_empty());
+    assert_eq!(ids(&rows.most_used), vec!["b", "a"]);
+}
+
+#[test]
+fn block_list_removes_app_from_its_row_only() {
+    let mut usage = AppUsage::default();
+    usage.record(&app("a"));
+    usage.record(&app("b"));
+    let rules = rules_with(|r| r.recent.block = vec!["a".to_owned()]);
+    let rows = usage.rows(&rules, &[], &[], None);
+    assert_eq!(ids(&rows.recent), vec!["b"]);
+    assert_eq!(ids(&rows.most_used), vec!["b", "a"]);
+}
+
+#[test]
+fn allow_list_limits_row_and_block_wins_over_allow() {
+    let mut usage = AppUsage::default();
+    usage.record(&app("a"));
+    usage.record(&app("b"));
+    usage.record(&app("c"));
+    let rules = rules_with(|r| {
+        r.most_used.allow = vec!["a".to_owned(), "b".to_owned()];
+        r.most_used.block = vec!["b".to_owned()];
+    });
+    let rows = usage.rows(&rules, &[], &[], None);
+    assert_eq!(ids(&rows.most_used), vec!["a"]);
+}
+
+#[test]
+fn never_show_applies_to_every_row() {
+    let mut usage = AppUsage::default();
+    usage.record(&app("a"));
+    let rules = rules_with(|r| r.never_show = vec!["a".to_owned()]);
+    let rows = usage.rows(&rules, &["a".to_owned()], &[], None);
+    assert!(rows.pinned.is_empty());
+    assert!(rows.recent.is_empty());
+    assert!(rows.most_used.is_empty());
+}
+
+#[test]
+fn pinned_row_keeps_priority_order_under_filter() {
+    let usage = AppUsage::default();
+    let rules = rules_with(|r| r.pinned.block = vec!["x".to_owned()]);
+    let pinned = ["p".to_owned(), "x".to_owned(), "q".to_owned()];
+    let rows = usage.rows(&rules, &pinned, &[], None);
+    assert_eq!(ids(&rows.pinned), vec!["p", "q"]);
+}
+
+#[test]
+fn row_rules_default_is_default_and_round_trips_through_toml() {
+    assert!(SwitcherRowRules::default().is_default());
+    let rules = rules_with(|r| {
+        r.recent.enabled = false;
+        r.never_show = vec!["com.example.app".to_owned()];
+    });
+    assert!(!rules.is_default());
+    let text = toml::to_string(&rules).expect("serializes");
+    let back: SwitcherRowRules = toml::from_str(&text).expect("parses");
+    assert_eq!(back, rules);
 }

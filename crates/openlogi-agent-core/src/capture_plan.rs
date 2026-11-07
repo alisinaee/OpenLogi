@@ -344,13 +344,15 @@ pub fn plan_for_device(
     let mut divert_gesture_buttons = Vec::new();
     let motion_buttons = motion_streaming_buttons(&bindings);
     if os_mouse_hook_available {
-        divert_gesture_buttons.extend(
-            DIVERTABLE_STANDARD_BUTTONS
-                .into_iter()
-                .filter(|(_, button)| side_gesture_bindings.contains_key(button) || motion_buttons.contains(button)),
-        );
+        divert_gesture_buttons.extend(DIVERTABLE_STANDARD_BUTTONS.into_iter().filter(
+            |(_, button)| {
+                side_gesture_bindings.contains_key(button) || motion_buttons.contains(button)
+            },
+        ));
     }
-    if gesture_bindings.contains_key(&ButtonId::DpiToggle) || motion_buttons.contains(&ButtonId::DpiToggle) {
+    if gesture_bindings.contains_key(&ButtonId::DpiToggle)
+        || motion_buttons.contains(&ButtonId::DpiToggle)
+    {
         divert_gesture_buttons.extend(
             DPI_MODE_SHIFT_CIDS
                 .into_iter()

@@ -405,3 +405,41 @@ fn interactive_space_round_trip() {
         });
     }
 }
+
+fn three_spaces(current: u64) -> SpaceState {
+    SpaceState {
+        display: "main".into(),
+        current,
+        ordered: vec![91, 7, 42],
+        fullscreen: vec![],
+    }
+}
+
+#[test]
+fn a_predicted_step_lands_on_the_neighbouring_space() {
+    assert_eq!(
+        predicted_position(&three_spaces(7), Direction::Next),
+        Some((3, 3))
+    );
+    assert_eq!(
+        predicted_position(&three_spaces(7), Direction::Previous),
+        Some((3, 1))
+    );
+}
+
+#[test]
+fn a_step_past_the_first_or_last_space_predicts_no_move() {
+    assert_eq!(
+        predicted_position(&three_spaces(91), Direction::Previous),
+        Some((3, 1))
+    );
+    assert_eq!(
+        predicted_position(&three_spaces(42), Direction::Next),
+        Some((3, 3))
+    );
+}
+
+#[test]
+fn an_unusable_space_list_predicts_nothing() {
+    assert_eq!(predicted_position(&three_spaces(5), Direction::Next), None);
+}

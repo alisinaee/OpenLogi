@@ -9,7 +9,9 @@
 
 use std::sync::Arc;
 
-use openlogi_core::switcher_rows::{Activation, AppUsage, Selection, SwitcherView};
+use openlogi_core::switcher_rows::{
+    Activation, AppUsage, Selection, SwitcherRow, SwitcherRowRules, SwitcherView,
+};
 
 use crate::observable::ObservableState;
 
@@ -19,6 +21,8 @@ use crate::observable::ObservableState;
 pub struct SwitcherInputs {
     /// The pinned apps' bundle ids, in order.
     pub pinned: Vec<String>,
+    /// Which rows show, and which apps each row leaves out.
+    pub rules: SwitcherRowRules,
     /// The activation history behind the Recent and Most used rows.
     pub usage: AppUsage,
     /// The app in front, which the Recent row leaves out.
@@ -114,13 +118,17 @@ impl ObservableSwitcher {
 
 impl SwitcherPort for ObservableSwitcher {
     fn snapshot(&self) -> SwitcherView {
-        let (windows, icons) = openlogi_inject::open_windows();
+        let (mut windows, icons) = openlogi_inject::open_windows();
         // An app with a window is running; the rows only ever ask that.
         let running: Vec<String> = windows.iter().map(|w| w.app.id.clone()).collect();
         let rows = self.observable.read_switcher(|inputs| {
-            inputs
-                .usage
-                .rows(&inputs.pinned, &running, inputs.frontmost.as_deref())
+            windows.retain(|w| inputs.rules.admits(SwitcherRow::Windows, &w.app.id));
+            inputs.usage.rows(
+                &inputs.rules,
+                &inputs.pinned,
+                &running,
+                inputs.frontmost.as_deref(),
+            )
         });
         SwitcherView::new(windows, rows, icons)
     }

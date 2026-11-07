@@ -80,13 +80,13 @@ pub use lights::{ConfigSource, LightWriteClaim, TakenLightChange, write_light};
 use devices::reapply_targets;
 use devices::{
     FollowerCookieState, FollowerCookieWrite, RECONNECT_REAPPLY_CONFIRM_RETRIES,
-    VOLATILE_REAPPLY_CONFIRM_RETRIES, assignments_changed, build_devices, bump_settings_epoch,
-    carry_lifecycle_budgets, changed_follower_cookies, changed_force_sensing,
+    VOLATILE_REAPPLY_CONFIRM_RETRIES, app_dpi_override, assignments_changed, build_devices,
+    bump_settings_epoch, carry_lifecycle_budgets, changed_follower_cookies, changed_force_sensing,
     config_keeps_os_layout, configured_dpi, configured_force_sensing, configured_report_rate,
-    configured_wheel_mode, host_switch_links, is_hidpp_device, keeps_os_layout, main_wheel_divert,
-    newly_kept_os_layouts, os_layout_appeared, pick_current, plan_disabled_keys_recovery,
-    plan_reapply, published_inventories, reconnect_follower_cookies, same_device_lifecycle,
-    saved_speed, settings_moved, stable_id, wheel_inverted,
+    configured_wheel_mode, desired_dpi, host_switch_links, is_hidpp_device, keeps_os_layout,
+    main_wheel_divert, newly_kept_os_layouts, os_layout_appeared, pick_current,
+    plan_disabled_keys_recovery, plan_reapply, published_inventories, reconnect_follower_cookies,
+    same_device_lifecycle, saved_speed, settings_moved, stable_id, wheel_inverted,
 };
 
 /// The minimal per-device facts the agent needs: the config key (binding /
@@ -574,6 +574,10 @@ pub struct Orchestrator {
     devices: Vec<AgentDevice>,
     current: usize,
     current_app: Option<String>,
+    /// The per-app DPI this agent last wrote to each mouse (by config key)
+    /// and that has not been written back yet. Absent: the mouse runs at
+    /// its device-wide DPI.
+    app_dpi_written: HashMap<String, Dpi>,
     /// What the foreground-app watcher has seen, for the switcher's rows.
     app_usage: crate::app_usage::AppUsageStore,
     pointer_context: openlogi_hook::PointerContext,
@@ -770,6 +774,7 @@ impl Orchestrator {
             devices: Vec::new(),
             current: 0,
             current_app: None,
+            app_dpi_written: HashMap::new(),
             app_usage: crate::app_usage::AppUsageStore::in_memory(),
             pointer_context: openlogi_hook::PointerContext {
                 app: None,
@@ -1279,14 +1284,15 @@ impl Orchestrator {
     /// Every online, enabled mouse whose speed OpenLogi sets, with how it
     /// sets it and the value saved for it.
     fn speed_mice(&self) -> impl Iterator<Item = SpeedMouse> + '_ {
+        let app = self.mouse_context().0;
         self.devices
             .iter()
             .filter(|dev| dev.online && self.config.device_enabled(&dev.config_key))
-            .filter_map(|dev| {
+            .filter_map(move |dev| {
                 Some(SpeedMouse {
                     key: dev.config_key.clone(),
                     route: dev.route.clone()?,
-                    saved: saved_speed(&self.config, dev)?,
+                    saved: saved_speed(&self.config, dev, app)?,
                 })
             })
     }
@@ -1714,7 +1720,7 @@ impl Orchestrator {
         let key = &dev.config_key;
         let route_key = stable_id(dev).route_key();
         let device = self.config.devices.get(key.as_str());
-        let saved = saved_speed(&self.config, dev);
+        let saved = saved_speed(&self.config, dev, self.mouse_context().0);
         let speed_write =
             saved.and_then(|saved| self.shared.pointer_speeds.reapply(key, &route, saved));
         // A DPI mouse gets its DPI from `speed_write`, numbered with the
@@ -2067,6 +2073,7 @@ impl Orchestrator {
         self.observable
             .set_switcher_inputs(crate::switcher::SwitcherInputs {
                 pinned: self.config.app_settings.pinned_apps.clone(),
+                rules: self.config.app_settings.app_switcher_rules.clone(),
                 usage: self.app_usage.usage().clone(),
                 frontmost: self.current_app.clone(),
                 language: self.config.app_settings.language.clone(),
@@ -2078,6 +2085,7 @@ impl Orchestrator {
     #[must_use]
     pub fn switcher_rows(&self, running: &[String]) -> openlogi_core::switcher_rows::SwitcherRows {
         self.app_usage.usage().rows(
+            &self.config.app_settings.app_switcher_rules,
             &self.config.app_settings.pinned_apps,
             running,
             self.current_app.as_deref(),
@@ -2140,6 +2148,7 @@ impl Orchestrator {
         }
         let previous = std::mem::replace(&mut self.current_app, id);
         self.publish_scroll_preferences();
+        self.apply_app_dpi();
         self.publish_switcher_inputs();
         self.publish_hook_maps(self.hook_maps_for(self.current_key()));
         // Capture plans are app-scoped (per-app binding overlays); republish
@@ -2171,6 +2180,7 @@ impl Orchestrator {
         // The wheel speed follows the app under the pointer too, so republish
         // it whenever the pointer moves to another window.
         self.publish_scroll_preferences();
+        self.apply_app_dpi();
         if self.config.app_settings.mouse_profile_target == MouseProfileTarget::Focused {
             return false;
         }
@@ -2282,6 +2292,7 @@ impl Orchestrator {
         }
 
         self.apply_changed_pointer_speeds(&previous);
+        self.apply_app_dpi();
         self.apply_enabled_os_layouts(&previous);
         let writes = changed_follower_cookies(
             &previous,
@@ -2368,6 +2379,62 @@ impl Orchestrator {
             assignments: assignments_changed(previous, &self.config, key),
         };
         for write in self.shared.pointer_speeds.reload(change, self.speed_mice()) {
+            self.write_pointer_speed(write);
+        }
+    }
+
+    /// The DPI writes the app in front (see [`Self::mouse_context`]) owes the
+    /// online DPI mice: its own DPI on entering an app that sets one, the
+    /// device-wide DPI on leaving it. A mouse that already holds the app's
+    /// DPI is left alone, so a device-wide change made meanwhile does not
+    /// overwrite it. Updates the record of what was written.
+    fn plan_app_dpi(&mut self) -> Vec<(DeviceRoute, Dpi)> {
+        let app = self.mouse_context().0.map(str::to_owned);
+        let mut writes = Vec::new();
+        let mut online = HashSet::new();
+        for dev in &self.devices {
+            if !dev.online || !self.config.device_enabled(&dev.config_key) {
+                continue;
+            }
+            let (Some(route), Some(SavedSpeed::Dpi(_))) = (
+                dev.route.clone(),
+                saved_speed(&self.config, dev, self.mouse_context().0),
+            ) else {
+                continue;
+            };
+            online.insert(dev.config_key.clone());
+            let key = &dev.config_key;
+            match (
+                app_dpi_override(&self.config, dev, app.as_deref()),
+                self.app_dpi_written.get(key).copied(),
+            ) {
+                (Some(want), Some(held)) if want == held => {}
+                (Some(want), _) => {
+                    self.app_dpi_written.insert(key.clone(), want);
+                    writes.push((route, want));
+                }
+                (None, Some(_)) => {
+                    self.app_dpi_written.remove(key);
+                    if let Some(dpi) = desired_dpi(&self.config, dev, app.as_deref()) {
+                        writes.push((route, dpi));
+                    }
+                }
+                (None, None) => {}
+            }
+        }
+        // A mouse that went offline reconnects at its device-wide DPI.
+        self.app_dpi_written.retain(|key, _| online.contains(key));
+        writes
+    }
+
+    /// Write what [`Self::plan_app_dpi`] plans, ordered with the other
+    /// pointer-speed writes and in the background, as a DPI preset action.
+    fn apply_app_dpi(&mut self) {
+        for (route, dpi) in self.plan_app_dpi() {
+            if let Ok(mut cycles) = self.shared.dpi_cycle.write() {
+                cycles.reapplied_at(&route, dpi);
+            }
+            let write = self.shared.pointer_speeds.preset_write(&route, dpi);
             self.write_pointer_speed(write);
         }
     }

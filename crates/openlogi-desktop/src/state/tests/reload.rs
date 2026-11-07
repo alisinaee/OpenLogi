@@ -202,7 +202,10 @@ fn pinned_apps_are_cleaned_persisted_and_reload_only_when_changed() {
     let expected = vec!["a.b.one".to_string(), "a.b.two".to_string()];
     assert_eq!(state.app_settings().pinned_apps, expected);
     assert_eq!(
-        Config::load_from_path(&path).unwrap().app_settings.pinned_apps,
+        Config::load_from_path(&path)
+            .unwrap()
+            .app_settings
+            .pinned_apps,
         expected
     );
     assert!(matches!(

@@ -6,8 +6,8 @@
 use appcatalog::{ApplicationIdentity, IdentityKind};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Task, Window, div, px,
+    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{InputEvent, InputState};
@@ -24,9 +24,25 @@ const MAX_SUGGESTIONS: usize = 6;
 /// One installed application: display name and the identifier the switcher
 /// matches on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Installed {
-    name: String,
-    id: String,
+pub(super) struct Installed {
+    pub(super) name: String,
+    pub(super) id: String,
+}
+
+/// The installed applications, listed on the background executor. Empty when
+/// the platform cannot list them (the failure is logged).
+pub(super) async fn discover_installed(cx: &gpui::AsyncApp) -> Vec<Installed> {
+    let found = cx
+        .background_executor()
+        .spawn(async { appcatalog::applications() })
+        .await;
+    match found {
+        Ok(applications) => installed_from(&applications),
+        Err(error) => {
+            tracing::warn!(%error, "failed to list apps to pin");
+            Vec::new()
+        }
+    }
 }
 
 pub(super) struct PinnedAppsPanel {
@@ -46,21 +62,16 @@ impl PinnedAppsPanel {
             }
         });
         let state_obs = AppState::repaint_on(cx, |event| {
-            matches!(event, StateEvent::SettingsChanged | StateEvent::AgentChanged)
+            matches!(
+                event,
+                StateEvent::SettingsChanged | StateEvent::AgentChanged
+            )
         });
         let discovery = cx.spawn(async move |panel, cx| {
-            let found = cx
-                .background_executor()
-                .spawn(async { appcatalog::applications() })
-                .await;
+            let installed = discover_installed(cx).await;
             panel
                 .update(cx, |panel, cx| {
-                    match found {
-                        Ok(applications) => panel.installed = installed_from(&applications),
-                        Err(error) => {
-                            tracing::warn!(%error, "failed to list apps to pin");
-                        }
-                    }
+                    panel.installed = installed;
                     cx.notify();
                 })
                 .ok();
@@ -120,7 +131,7 @@ fn removed(pinned: &[String], index: usize) -> Vec<String> {
 
 /// The apps to offer for `query`: matches among the installed apps, or the
 /// recently used ones while the query is empty; never one already pinned.
-fn suggestions(
+pub(super) fn suggestions(
     query: &str,
     installed: &[Installed],
     recent: &[Installed],
@@ -145,15 +156,28 @@ fn commit(cx: &mut gpui::App, apps: Vec<String>) {
     AppState::apply(cx, |state| state.commit_pinned_apps(apps));
 }
 
+/// What a pinned row carries while it is dragged: the row it came from.
+#[derive(Clone)]
+struct DraggedPin {
+    from: usize,
+    name: SharedString,
+}
+
+impl Render for DraggedPin {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(theme::accent_tint())
+            .child(self.name.clone())
+    }
+}
+
 impl Render for PinnedAppsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let pal = theme::palette(cx);
-        localize_placeholder(
-            &self.search,
-            tr!("app.pinned_apps_search"),
-            window,
-            cx,
-        );
+        localize_placeholder(&self.search, tr!("app.pinned_apps_search"), window, cx);
         let (pinned, recent) = AppState::try_read(cx).map_or_else(
             || (Vec::new(), Vec::new()),
             |state| {
@@ -188,10 +212,20 @@ impl Render for PinnedAppsPanel {
             let name = name_of(id);
             let show_id = name.as_ref() != id.as_str();
             let list = pinned.clone();
-            let (up, down, remove) = (list.clone(), list.clone(), list);
+            let (up, down, remove, drop) = (list.clone(), list.clone(), list.clone(), list);
+            let dragged = DraggedPin {
+                from: index,
+                name: name.clone(),
+            };
             h_flex()
+                .id(("pinned-row", index))
                 .gap_2()
                 .items_center()
+                .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                .drag_over::<DraggedPin>(|style, _, _, _| style.bg(theme::accent_tint()))
+                .on_drop(move |dragged: &DraggedPin, _, cx| {
+                    commit(cx, moved(&drop, dragged.from, index));
+                })
                 .child(
                     v_flex()
                         .flex_1()

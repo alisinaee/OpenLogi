@@ -13,7 +13,7 @@ use crate::ui::theme::FocusRingStyle as _;
 use crate::ui::theme::Typography as _;
 use gpui_base::Button as BaseButton;
 use gpui_component::radio::{Radio, RadioGroup};
-use openlogi_core::config::{DesktopSwitcherSize, MouseProfileTarget, WheelEasing, WheelFeel};
+use openlogi_core::config::{MouseProfileTarget, WheelEasing, WheelFeel};
 
 use crate::features::pointer::momentum::MomentumPanel;
 use crate::platform::registration::ServiceStatus;
@@ -81,8 +81,8 @@ pub(super) fn general_page(
     controls: ScrollControls,
     momentum: Entity<MomentumPanel>,
     pinned_apps: Entity<super::pinned_apps::PinnedAppsPanel>,
+    app_switcher_rows: Entity<super::app_switcher_rows::AppSwitcherRowsPanel>,
     registration_status: ServiceStatus,
-    show_desktop_switcher: bool,
 ) -> SettingPage {
     let ScrollControls {
         vertical_scroll,
@@ -134,17 +134,7 @@ pub(super) fn general_page(
     } else {
         group
     };
-    // Only macOS animates a desktop switch, so only macOS shows the switch.
-    // `cfg!` keeps the item and its setter compiled, and used, everywhere.
-    let group = if cfg!(target_os = "macos") {
-        group
-            .item(animate_desktop_switch_item())
-            .item(show_desktop_switcher_item())
-            .item(desktop_switcher_show_apps_item(show_desktop_switcher))
-            .item(desktop_switcher_size_item(show_desktop_switcher))
-    } else {
-        group
-    };
+    // The desktop switcher controls live on the Home page now.
     let group = group.item(launch_at_login_item());
 
     // Switched off under System Settings › Login Items: nothing can start
@@ -205,6 +195,14 @@ pub(super) fn general_page(
                 .description(tr!("app.pinned_apps_description"))
                 .item(SettingItem::render(move |_, _, _| pinned_apps.clone())),
         )
+        .group(
+            SettingGroup::new()
+                .title(tr!("app.switcher_rows"))
+                .description(tr!("app.switcher_rows_description"))
+                .item(SettingItem::render(move |_, _, _| {
+                    app_switcher_rows.clone()
+                })),
+        )
     } else {
         page
     }
@@ -258,93 +256,6 @@ fn smooth_scrolling_item() -> SettingItem {
         ),
     )
     .description(tr!("pointer.smooth_scrolling_description"))
-}
-
-/// The switch for the Previous/Next Desktop slide.
-fn animate_desktop_switch_item() -> SettingItem {
-    SettingItem::new(
-        tr!("app.animate_desktop_switch"),
-        SettingField::switch(
-            |cx| AppState::try_read(cx).is_some_and(|s| s.app_settings().animate_desktop_switch),
-            |enabled, cx| {
-                AppState::apply(cx, |state| state.commit_animate_desktop_switch(enabled));
-            },
-        ),
-    )
-    .description(tr!("app.animate_desktop_switch_description"))
-}
-
-/// The switch for the overlay shown after Previous/Next Desktop.
-fn show_desktop_switcher_item() -> SettingItem {
-    SettingItem::new(
-        tr!("app.show_desktop_switcher"),
-        SettingField::switch(
-            |cx| AppState::try_read(cx).is_some_and(|s| s.app_settings().show_desktop_switcher),
-            |enabled, cx| {
-                AppState::apply(cx, |state| state.commit_show_desktop_switcher(enabled));
-            },
-        ),
-    )
-    .description(tr!("app.show_desktop_switcher_description"))
-}
-
-/// The switch for mapping each desktop's windows and apps inside the desktop
-/// switcher. Off while the switcher itself is off, since it has nothing to
-/// decorate.
-fn desktop_switcher_show_apps_item(show_desktop_switcher: bool) -> SettingItem {
-    SettingItem::new(
-        tr!("app.desktop_switcher_show_apps"),
-        SettingField::switch(
-            |cx| {
-                AppState::try_read(cx).is_some_and(|s| s.app_settings().desktop_switcher_show_apps)
-            },
-            |enabled, cx| {
-                AppState::apply(cx, |state| state.commit_desktop_switcher_show_apps(enabled));
-            },
-        ),
-    )
-    .description(tr!("app.desktop_switcher_show_apps_description"))
-    .disabled(!show_desktop_switcher)
-}
-
-/// The segmented picker for how large the desktop switcher is drawn. Off
-/// while the switcher itself is off, like the apps switch.
-fn desktop_switcher_size_item(show_desktop_switcher: bool) -> SettingItem {
-    SettingItem::new(
-        tr!("app.desktop_switcher_size"),
-        SettingField::render(|_, _, cx| {
-            let size = AppState::try_read(cx)
-                .map_or_else(Default::default, |s| s.app_settings().desktop_switcher_size);
-            let selected = DesktopSwitcherSize::ALL
-                .iter()
-                .position(|choice| *choice == size)
-                .unwrap_or_default();
-            RadioGroup::horizontal("desktop-switcher-size")
-                .child(
-                    Radio::new("desktop-switcher-size-small")
-                        .label(tr!("app.desktop_switcher_size_small"))
-                        .debug_selector(|| "desktop-switcher-size-small".into()),
-                )
-                .child(
-                    Radio::new("desktop-switcher-size-medium")
-                        .label(tr!("app.desktop_switcher_size_medium"))
-                        .debug_selector(|| "desktop-switcher-size-medium".into()),
-                )
-                .child(
-                    Radio::new("desktop-switcher-size-large")
-                        .label(tr!("app.desktop_switcher_size_large"))
-                        .debug_selector(|| "desktop-switcher-size-large".into()),
-                )
-                .selected_index(Some(selected))
-                .on_change(|index, _, cx| {
-                    if let Some(size) = DesktopSwitcherSize::ALL.get(*index).copied() {
-                        AppState::apply(cx, |state| state.commit_desktop_switcher_size(size));
-                    }
-                })
-        }),
-    )
-    .description(tr!("app.desktop_switcher_size_description"))
-    .disabled(!show_desktop_switcher)
 }
 
 /// The switch for capturing standard mouse buttons and wheel events with OS hooks.

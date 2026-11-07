@@ -147,13 +147,19 @@ pub(super) fn changed_force_sensing(
 
 /// How precision mode sets `dev`'s speed, with the value saved for it, or
 /// `None` when OpenLogi does not set its speed. A mouse with sensor DPI is a
-/// DPI mouse; [`Capabilities::pointer_scaling`] is never set on one.
+/// DPI mouse; [`Capabilities::pointer_scaling`] is never set on one. A DPI
+/// mouse saves the DPI for `app` (see [`desired_dpi`]), so a reconnect while
+/// that app is in front comes back at the app's DPI.
 ///
 /// [`Capabilities::pointer_scaling`]: openlogi_core::device::Capabilities::pointer_scaling
-pub(super) fn saved_speed(config: &Config, dev: &AgentDevice) -> Option<SavedSpeed> {
+pub(super) fn saved_speed(
+    config: &Config,
+    dev: &AgentDevice,
+    app: Option<&str>,
+) -> Option<SavedSpeed> {
     let caps = dev.capabilities?;
     if caps.pointer {
-        Some(SavedSpeed::Dpi(configured_dpi(config, dev)))
+        Some(SavedSpeed::Dpi(desired_dpi(config, dev, app)))
     } else if caps.pointer_scaling {
         Some(SavedSpeed::Scaled(config.pointer_speed(&dev.config_key)))
     } else {
@@ -168,6 +174,21 @@ pub(super) fn configured_dpi(config: &Config, dev: &AgentDevice) -> Option<Dpi> 
         .devices
         .get(dev.config_key.as_str())
         .and_then(|device| device.effective_dpi(&stable_id(dev).route_key()))
+}
+
+/// The DPI `app` sets for `dev` while in front, when its entry stores one.
+pub(super) fn app_dpi_override(
+    config: &Config,
+    dev: &AgentDevice,
+    app: Option<&str>,
+) -> Option<Dpi> {
+    config.app_dpi(&dev.config_key, app?)
+}
+
+/// The DPI `dev` should run at while `app` is in front: the app's own, else
+/// the device-wide [`configured_dpi`].
+pub(super) fn desired_dpi(config: &Config, dev: &AgentDevice, app: Option<&str>) -> Option<Dpi> {
+    app_dpi_override(config, dev, app).or_else(|| configured_dpi(config, dev))
 }
 
 /// Whether the button assignments of the device `key` names differ between

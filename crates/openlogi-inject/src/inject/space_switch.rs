@@ -133,7 +133,9 @@ impl SpaceState {
         ))
     }
 
-    fn target(&self, direction: Direction) -> Result<Option<u64>, Failure> {
+    /// The Space one step in `direction` lands on: `None` at the first or
+    /// last Space, and an error when the list is not usable.
+    pub(super) fn target(&self, direction: Direction) -> Result<Option<u64>, Failure> {
         if self.display.is_empty()
             || self.current == 0
             || self

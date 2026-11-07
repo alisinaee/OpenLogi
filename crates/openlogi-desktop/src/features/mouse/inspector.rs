@@ -18,6 +18,7 @@ use openlogi_core::binding::{
     default_binding, default_binding_on,
 };
 use openlogi_core::config::VerticalScrollSensitivity;
+use openlogi_core::hid::Dpi;
 
 use super::app_switcher::AppSwitcherControls;
 use super::force_sensing::{PressForce, force_sensing_row};
@@ -56,6 +57,8 @@ pub(super) struct BindingInspectorData<'a> {
     pub overridden: Option<AppOverrides<'a>>,
     /// The open application profile's main-wheel speed and whether it sets one.
     pub app_wheel_speed: Option<(VerticalScrollSensitivity, bool)>,
+    /// The open application profile's DPI on this device and whether it sets one.
+    pub app_dpi: Option<(Dpi, bool)>,
     /// The haptic panel's press-force row, present only while
     /// [`ForceSensingFacts::current`](super::force_sensing::ForceSensingFacts::current)
     /// says it shows.
@@ -185,7 +188,9 @@ pub(super) fn binding_inspector(
             data.editing_app,
             data.overridden.map_or(0, AppOverrides::len),
             data.app_wheel_speed,
+            data.app_dpi,
             pal,
+            cx,
         ),
         Some(MouseControlId::ThumbwheelRotation) => thumbwheel_inspector(
             data.bindings,
@@ -193,6 +198,7 @@ pub(super) fn binding_inspector(
             data.overridden,
             picker,
             pal,
+            cx,
         ),
         Some(MouseControlId::Button(button)) => button_inspector(button, &data, picker, pal, cx),
     };
@@ -220,7 +226,9 @@ fn empty_inspector(
     app: Option<&str>,
     override_count: usize,
     app_wheel_speed: Option<(VerticalScrollSensitivity, bool)>,
+    app_dpi: Option<(Dpi, bool)>,
     pal: Palette,
+    cx: &Context<MouseModelView>,
 ) -> gpui::Div {
     let summary = match (app, override_count) {
         (Some(app), 0) => tr!(
@@ -249,6 +257,92 @@ fn empty_inspector(
         .when_some(app_wheel_speed, |panel, speed| {
             panel.child(app_wheel_speed_block(speed, pal))
         })
+        .when_some(app_dpi, |panel, dpi| {
+            panel.child(app_dpi_block(dpi, pal, cx))
+        })
+}
+
+/// The open application profile's DPI: step buttons and the device's presets
+/// write the profile's own DPI, and a way back to the device DPI once it has one.
+fn app_dpi_block((dpi, own): (Dpi, bool), pal: Palette, cx: &Context<MouseModelView>) -> gpui::Div {
+    let (values, presets) = AppState::try_read(cx).map_or_else(
+        || (Vec::new(), Vec::new()),
+        |state| {
+            (
+                state
+                    .active_dpi_capabilities()
+                    .map(|caps| caps.values().to_vec())
+                    .unwrap_or_default(),
+                state.dpi_presets(),
+            )
+        },
+    );
+    let lower = values.iter().rev().find(|value| **value < dpi).copied();
+    let higher = values.iter().find(|value| **value > dpi).copied();
+    let status = if own {
+        tr!("pointer.app_dpi_own")
+    } else {
+        tr!("pointer.app_dpi_inherited")
+    };
+    let row = h_flex()
+        .gap_2()
+        .items_center()
+        .flex_wrap()
+        .child(
+            Button::new("inspector-app-dpi-down")
+                .small()
+                .label("−")
+                .disabled(lower.is_none())
+                .on_click(move |_, _, cx| {
+                    if let Some(next) = lower {
+                        AppState::apply(cx, |state| state.commit_current_app_dpi(Some(next)));
+                    }
+                }),
+        )
+        .child(div().text_body().child(format!("{dpi}")))
+        .child(
+            Button::new("inspector-app-dpi-up")
+                .small()
+                .label("+")
+                .disabled(higher.is_none())
+                .on_click(move |_, _, cx| {
+                    if let Some(next) = higher {
+                        AppState::apply(cx, |state| state.commit_current_app_dpi(Some(next)));
+                    }
+                }),
+        )
+        .when(own, |row| {
+            row.child(
+                Button::new("inspector-app-dpi-device")
+                    .small()
+                    .label(tr!("pointer.app_dpi_use_device"))
+                    .on_click(move |_, _, cx| {
+                        AppState::apply(cx, |state| state.commit_current_app_dpi(None));
+                    }),
+            )
+        });
+    let chips = h_flex()
+        .gap_1()
+        .flex_wrap()
+        .children(presets.into_iter().enumerate().map(|(idx, preset)| {
+            Button::new(("inspector-app-dpi-preset", idx))
+                .small()
+                .label(format!("{preset}"))
+                .on_click(move |_, _, cx| {
+                    AppState::apply(cx, |state| state.commit_current_app_dpi(Some(preset)));
+                })
+        }));
+    v_flex()
+        .gap_2()
+        .child(inspector_heading(tr!("pointer.app_dpi_title"), None, pal))
+        .child(
+            div()
+                .text_caption()
+                .text_color(pal.text_muted)
+                .child(status),
+        )
+        .child(row)
+        .child(chips)
 }
 
 /// The open application profile's main-wheel speed: step buttons that write
@@ -313,8 +407,17 @@ fn app_wheel_speed_block(
         });
     v_flex()
         .gap_2()
-        .child(inspector_heading(tr!("pointer.app_wheel_speed_title"), None, pal))
-        .child(div().text_caption().text_color(pal.text_muted).child(status))
+        .child(inspector_heading(
+            tr!("pointer.app_wheel_speed_title"),
+            None,
+            pal,
+        ))
+        .child(
+            div()
+                .text_caption()
+                .text_color(pal.text_muted)
+                .child(status),
+        )
         .child(row)
 }
 
@@ -833,6 +936,7 @@ fn thumbwheel_inspector(
     overridden: Option<AppOverrides<'_>>,
     picker: ActionPickerContext<'_>,
     pal: Palette,
+    cx: &Context<MouseModelView>,
 ) -> gpui::Div {
     let backward = bindings
         .get(&ButtonId::ThumbwheelScrollDown)
@@ -872,6 +976,13 @@ fn thumbwheel_inspector(
             picker,
             pal,
         ))
+        .when(
+            matches!(
+                current,
+                Some(ThumbwheelPreset::Desktops | ThumbwheelPreset::DesktopsReversed)
+            ),
+            |panel| panel.child(super::desktop_switcher::desktop_switcher_panel(pal, cx)),
+        )
         .when(picker.open, |panel| {
             panel.child(
                 v_flex()
@@ -1329,6 +1440,7 @@ mod tests {
             editing_app: None,
             overridden: None,
             app_wheel_speed: None,
+            app_dpi: None,
             press_force: None,
             long_presses: &NO_LONG_PRESSES,
             hold_editable: false,

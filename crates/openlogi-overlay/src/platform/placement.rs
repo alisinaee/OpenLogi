@@ -132,6 +132,11 @@ struct CursorScreen {
     clippy::cast_possible_truncation,
     reason = "native cursor coordinates are screen-sized and exactly usable as GPUI f32 pixels"
 )]
+/// The GPUI display under the cursor, the one a notice opened now would sit on.
+pub(crate) fn cursor_display(cx: &gpui::App) -> Option<DisplayId> {
+    cursor_screen(cx).display_id
+}
+
 fn cursor_screen(cx: &gpui::App) -> CursorScreen {
     let cursor = openlogi_hook::cursor_position();
     // macOS GPUI bounds are display-relative; translate the global cursor

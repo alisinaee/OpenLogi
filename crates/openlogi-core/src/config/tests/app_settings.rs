@@ -254,12 +254,12 @@ fn desktop_switcher_size_defaults_medium_and_is_left_out_of_the_file() {
 }
 
 #[test]
-fn desktop_switcher_size_scales_small_medium_and_large() {
+fn desktop_switcher_size_scales_from_small_to_maximum() {
     let scales: Vec<f32> = DesktopSwitcherSize::ALL
         .iter()
         .map(|size| size.scale())
         .collect();
-    assert_eq!(scales, [0.8, 1.0, 1.3]);
+    assert_eq!(scales, [0.8, 1.0, 1.3, 1.6, 2.0]);
 }
 
 #[test]

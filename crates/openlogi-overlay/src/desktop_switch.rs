@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyWindowHandle, App, AppContext as _, Context,
-    FontWeight, Hsla, IntoElement, ParentElement, Pixels, Render, SharedString, Size, Styled,
-    Window, WindowHandle, div, hsla, img, px, size,
+    DisplayId, FontWeight, Hsla, IntoElement, ParentElement, Pixels, Render, SharedString, Size,
+    Styled, Window, WindowHandle, div, hsla, img, px, size,
 };
 use openlogi_core::config::DesktopSwitcherSize;
 use openlogi_core::desktop_schema::{DesktopSchema, MAX_ICONS, SchemaApp, tint_hue};
@@ -376,6 +376,9 @@ fn mapped_tile(
 /// The switcher window's view.
 pub(crate) struct SwitcherView {
     switcher: Switcher,
+    /// The display the window opened on. A switch on another display replaces
+    /// the window rather than leaving it where it is.
+    display: Option<DisplayId>,
 }
 
 impl Render for SwitcherView {
@@ -453,10 +456,15 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
         }
         return;
     };
+    let here = crate::platform::cursor_display(cx);
     let mut reused = false;
     for view in open {
+        // A window stays on the display it opened on, so a switch made on
+        // another display needs a window there.
         let same_row = view.read(cx).is_ok_and(|view| {
-            shape(&view.switcher) == shape(&switcher) && view.switcher.size == switcher.size
+            shape(&view.switcher) == shape(&switcher)
+                && view.switcher.size == switcher.size
+                && view.display == here
         });
         if same_row && !reused {
             let next = switcher.clone();
@@ -494,6 +502,7 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
         cx.open_window(options, |_, cx| {
             cx.new(|_| SwitcherView {
                 switcher: switcher.clone(),
+                display: here,
             })
         })
     });
@@ -730,12 +739,14 @@ mod tests {
     #[test]
     fn the_size_setting_scales_the_whole_switcher() {
         let width = |size| window_size((3, true), Scale::of(size)).width;
-        let (small, medium, large) = (
-            width(DesktopSwitcherSize::Small),
-            width(DesktopSwitcherSize::Medium),
-            width(DesktopSwitcherSize::Large),
+        let widths = DesktopSwitcherSize::ALL.map(width);
+        assert!(
+            widths.windows(2).all(|pair| pair[0] < pair[1]),
+            "{widths:?} must grow from the smallest size to the largest"
         );
-        assert!(small < medium && medium < large, "{small} {medium} {large}");
-        assert_eq!(medium, window_size((3, true), Scale(1.0)).width);
+        assert_eq!(
+            width(DesktopSwitcherSize::Medium),
+            window_size((3, true), Scale(1.0)).width
+        );
     }
 }

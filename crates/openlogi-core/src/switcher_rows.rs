@@ -80,6 +80,73 @@ impl RowApp {
     }
 }
 
+/// Whether one row of the switcher is shown, and which apps it may show.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RowPolicy {
+    /// Whether the row is shown at all. **On by default.**
+    pub enabled: bool,
+    /// When not empty, the only apps the row shows, as application ids.
+    pub allow: Vec<String>,
+    /// Apps the row never shows, as application ids. Wins over [`Self::allow`].
+    pub block: Vec<String>,
+}
+
+impl Default for RowPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allow: Vec::new(),
+            block: Vec::new(),
+        }
+    }
+}
+
+/// The per-row rules of the app switcher, and the apps no row shows.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SwitcherRowRules {
+    /// The running-windows row.
+    pub windows: RowPolicy,
+    /// The pinned row. Its order is the pinned list's order, not set here.
+    pub pinned: RowPolicy,
+    /// The recent row.
+    pub recent: RowPolicy,
+    /// The most used row.
+    pub most_used: RowPolicy,
+    /// Apps no row shows, whatever the row's own lists say.
+    pub never_show: Vec<String>,
+}
+
+impl SwitcherRowRules {
+    /// Whether no row is restricted, so the setting is left out of the file.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The policy of `row`.
+    #[must_use]
+    pub const fn policy(&self, row: SwitcherRow) -> &RowPolicy {
+        match row {
+            SwitcherRow::Windows => &self.windows,
+            SwitcherRow::Pinned => &self.pinned,
+            SwitcherRow::Recent => &self.recent,
+            SwitcherRow::MostUsed => &self.most_used,
+        }
+    }
+
+    /// Whether `row` may show the app `id`. A disabled row shows nothing.
+    #[must_use]
+    pub fn admits(&self, row: SwitcherRow, id: &str) -> bool {
+        let policy = self.policy(row);
+        policy.enabled
+            && !self.never_show.iter().any(|blocked| blocked == id)
+            && !policy.block.iter().any(|blocked| blocked == id)
+            && (policy.allow.is_empty() || policy.allow.iter().any(|allowed| allowed == id))
+    }
+}
+
 /// The three app rows. The windows row is not here: its entries are windows,
 /// not apps, and come from the window list.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -326,10 +393,12 @@ impl AppUsage {
     ///
     /// `pinned` is the configured bundle ids in order; `running` the ids of
     /// the apps open now; `frontmost` the app in front, which the recent row
-    /// leaves out because choosing it would change nothing.
+    /// leaves out because choosing it would change nothing. `rules` decides
+    /// which apps each row may show, before the row is cut to its length.
     #[must_use]
     pub fn rows(
         &self,
+        rules: &SwitcherRowRules,
         pinned: &[String],
         running: &[String],
         frontmost: Option<&str>,
@@ -346,7 +415,7 @@ impl AppUsage {
             .filter(|id| {
                 let fresh = !seen_pinned.contains(&id.as_str());
                 seen_pinned.push(id);
-                fresh
+                fresh && rules.admits(SwitcherRow::Pinned, id)
             })
             .take(MAX_ROW_LEN)
             .map(|id| {
@@ -360,7 +429,9 @@ impl AppUsage {
         let recent = self
             .recent
             .iter()
-            .filter(|app| Some(app.id.as_str()) != frontmost)
+            .filter(|app| {
+                Some(app.id.as_str()) != frontmost && rules.admits(SwitcherRow::Recent, &app.id)
+            })
             .take(MAX_ROW_LEN)
             .map(entry)
             .collect();
@@ -369,6 +440,7 @@ impl AppUsage {
         ranked.sort_by_key(|a| std::cmp::Reverse((a.1.count, a.1.last)));
         let most_used = ranked
             .into_iter()
+            .filter(|(id, _)| rules.admits(SwitcherRow::MostUsed, id))
             .take(MAX_ROW_LEN)
             .map(|(id, c)| {
                 entry(&ForegroundApp {

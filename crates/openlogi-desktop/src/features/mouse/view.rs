@@ -113,6 +113,8 @@ struct MouseWorkspaceData<'a> {
     overridden: Option<AppOverrides<'a>>,
     /// The open application profile's main-wheel speed and whether it sets one.
     app_wheel_speed: Option<(openlogi_core::config::VerticalScrollSensitivity, bool)>,
+    /// The open application profile's DPI for this device and whether it sets one.
+    app_dpi: Option<(openlogi_core::hid::Dpi, bool)>,
     /// Actions the picker offers beyond the catalog.
     extra_actions: &'static [Action],
     /// Catalog actions the picker leaves out.
@@ -155,6 +157,7 @@ impl<'a> MouseWorkspaceData<'a> {
             },
             overridden: state.editing_app_overrides(),
             app_wheel_speed: state.current_app_wheel_speed(),
+            app_dpi: state.current_app_device_dpi(),
             extra_actions: held_actions(
                 state.current_gaming_layout().is_some()
                     && state.binding_layer() == BindingLayer::Normal,
@@ -191,6 +194,7 @@ impl<'a> MouseWorkspaceData<'a> {
             editing_app: None,
             overridden: None,
             app_wheel_speed: None,
+            app_dpi: None,
             extra_actions: &[],
             hidden_actions: &[],
         }
@@ -605,6 +609,7 @@ impl Render for MouseModelView {
             editing_app,
             overridden,
             app_wheel_speed,
+            app_dpi,
             extra_actions,
             hidden_actions,
         } = MouseWorkspaceData::read(cx).unwrap_or_else(MouseWorkspaceData::empty);
@@ -688,6 +693,7 @@ impl Render for MouseModelView {
                 editing_app: editing_app.as_deref(),
                 overridden,
                 app_wheel_speed,
+                app_dpi,
                 press_force: PressForce::of(force_sensing.as_ref(), self.force_sensing.as_ref()),
                 extra_actions,
                 hidden_actions,

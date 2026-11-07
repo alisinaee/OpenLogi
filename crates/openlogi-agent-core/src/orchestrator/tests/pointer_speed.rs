@@ -56,12 +56,12 @@ fn saved_speed_follows_the_speed_feature_and_the_saved_value() {
     let mut config = Config::default();
     let mut device = scaled_mouse();
     assert_eq!(
-        saved_speed(&config, &device),
+        saved_speed(&config, &device, None),
         Some(SavedSpeed::Scaled(None))
     );
     config.set_pointer_speed("a", speed(0x0180));
     assert_eq!(
-        saved_speed(&config, &device),
+        saved_speed(&config, &device, None),
         Some(SavedSpeed::Scaled(Some(speed(0x0180))))
     );
 
@@ -71,18 +71,21 @@ fn saved_speed_follows_the_speed_feature_and_the_saved_value() {
         pointer_scaling: true,
         ..Capabilities::default()
     });
-    assert_eq!(saved_speed(&config, &device), Some(SavedSpeed::Dpi(None)));
+    assert_eq!(
+        saved_speed(&config, &device, None),
+        Some(SavedSpeed::Dpi(None))
+    );
     config.set_dpi("a", Dpi::new(1600));
     assert_eq!(
-        saved_speed(&config, &device),
+        saved_speed(&config, &device, None),
         Some(SavedSpeed::Dpi(Some(Dpi::new(1600))))
     );
 
     // A mouse without either feature, or not yet probed, is never written.
     device.capabilities = Some(Capabilities::default());
-    assert_eq!(saved_speed(&config, &device), None);
+    assert_eq!(saved_speed(&config, &device, None), None);
     device.capabilities = None;
-    assert_eq!(saved_speed(&config, &device), None);
+    assert_eq!(saved_speed(&config, &device, None), None);
 }
 
 #[test]

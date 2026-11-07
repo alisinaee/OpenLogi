@@ -438,6 +438,7 @@ fn a_selected_gesture_can_render_in_the_binding_inspector(cx: &mut TestAppContex
                 editing_app: None,
                 overridden: None,
                 app_wheel_speed: None,
+                app_dpi: None,
                 press_force: None,
                 extra_actions: &[],
                 hidden_actions: &[],

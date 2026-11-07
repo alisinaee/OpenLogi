@@ -9,6 +9,20 @@ mod windows;
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) use placement::{NoticePlacement, RingPlacement};
+
+/// The display the cursor is on, where the platform can tell; `None` means
+/// the caller cannot tell displays apart and keeps its usual placement.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn cursor_display(cx: &gpui::App) -> Option<gpui::DisplayId> {
+    placement::cursor_display(cx)
+}
+
+/// Windows places notices on the taskbar's display, so it cannot tell displays
+/// apart here.
+#[cfg(target_os = "windows")]
+pub(crate) fn cursor_display(_cx: &gpui::App) -> Option<gpui::DisplayId> {
+    None
+}
 #[cfg(target_os = "windows")]
 pub(crate) use windows::{NoticePlacement, RingPlacement};
 

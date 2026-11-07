@@ -1,10 +1,12 @@
 //! The wheel playground, a Settings page for trying the scroll settings.
 //!
 //! A tall list of numbered rows sits beside the controls that shape the wheel:
-//! smooth scrolling, direction, easing, duration, sensitivity and momentum.
-//! The controls are the General page's own entities and `AppState` setters, so
-//! a change here is the same change there. The agent already transforms the
-//! real wheel, so scrolling the list shows how the current settings feel. The
+//! easing, duration, sensitivity and momentum. The controls are the General
+//! page's own entities and `AppState` setters, so a change here is the same
+//! change there. Smooth scrolling and direction are not repeated here; they
+//! live in General and on each mouse's Pointer tab. The agent already
+//! transforms the real wheel, so scrolling the list shows how the current
+//! settings feel. The
 //! readout counts the wheel events the list receives and shows the last delta.
 //!
 //! Strings are English only: the locale catalogs are not extended yet.
@@ -18,14 +20,13 @@ use gpui_component::input::InputState;
 use gpui_component::select::SelectState;
 use gpui_component::setting::{SettingGroup, SettingItem, SettingPage};
 use gpui_component::slider::SliderState;
-use gpui_component::{Disableable as _, IconName, Selectable as _, h_flex, v_flex};
+use gpui_component::{IconName, h_flex, v_flex};
 use openlogi_core::config::{VerticalScrollSensitivity, WheelFeel};
 
 use super::general::{SliderWithEntry, WheelEasingOption};
 use crate::features::pointer::momentum::MomentumPanel;
-use crate::state::AppState;
 use crate::ui::commit_slider::SliderUnit;
-use crate::ui::components::{Toggle, control_button, control_select, toggle_row};
+use crate::ui::components::{control_button, control_select};
 use crate::ui::slider_row::{SliderRow, slider_with_entry};
 use crate::ui::theme::{self, Typography as _};
 
@@ -160,41 +161,16 @@ fn controls(
     cx: &mut gpui::App,
 ) -> impl IntoElement {
     let pal = theme::palette(cx);
-    let (smooth, inverted, invertible) =
-        AppState::try_read(cx).map_or((false, false, false), |s| {
-            (
-                s.app_settings().smooth_scroll,
-                s.current_invert_scroll(),
-                s.current_scroll_inversion_available(),
-            )
-        });
     v_flex()
         .flex_1()
         .min_w(px(260.))
         .gap_4()
-        .child(toggle_row(
-            "wheel-playground-smooth",
-            pal,
-            "Smooth scrolling".into(),
-            "Animate wheel steps instead of jumping.".into(),
-            Toggle::new("wheel-playground-smooth-toggle")
-                .selected(smooth)
-                .on_change(|enabled, _, cx| {
-                    AppState::apply(cx, |state| state.commit_smooth_scroll(*enabled));
-                }),
-        ))
-        .child(toggle_row(
-            "wheel-playground-invert",
-            pal,
-            "Invert scroll direction".into(),
-            "Applies to the selected mouse.".into(),
-            Toggle::new("wheel-playground-invert-toggle")
-                .selected(inverted)
-                .disabled(!invertible)
-                .on_change(|inverted, _, cx| {
-                    AppState::apply(cx, |state| state.commit_invert_scroll(*inverted));
-                }),
-        ))
+        .child(
+            div()
+                .text_caption()
+                .text_color(pal.text_muted)
+                .child("Smooth scrolling and invert direction are set in General and on the mouse's Pointer tab."),
+        )
         .child(
             v_flex()
                 .gap_1()

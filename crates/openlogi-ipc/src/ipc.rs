@@ -189,7 +189,8 @@ pub use succession::Identity;
 ///      switcher's rows and selection while the button's mouse travel moves
 ///      the cursor across them, as a [`SwitcherView`]. `size` appended to
 ///      `NoticeKind::DesktopSwitch` after its schema — the switcher's
-///      [`DesktopSwitcherSize`].
+///      [`DesktopSwitcherSize`]. Its `ExtraLarge` and `Maximum` variants are
+///      appended after the original three.
 pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Environment variable through which the agent hands a supervised helper the

@@ -405,3 +405,42 @@ fn a_write_that_did_not_reach_the_mouse_reads_it_again(cx: &mut gpui::TestAppCon
         (Dpi::new(1600), Dpi::new(1600), Some(SAVED))
     );
 }
+
+#[test]
+fn app_dpi_sets_and_clears_the_per_app_entry() {
+    let resolver = AssetResolver::new();
+    let (commands, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut state = AppState::new(Sources {
+        inventories: &[direct_inventory([0xa3, 0x93, 0xca, 0xe0])],
+        ..Sources::in_memory(Config::ephemeral(), &resolver, commands)
+    });
+    let _ = state.set_editing_app(Some("com.apple.Safari".into()));
+    let key = state
+        .current_record()
+        .and_then(DeviceRecord::persistent_config_key)
+        .expect("the fixture mouse is persistent")
+        .to_string();
+    let stored = |state: &AppState| {
+        state
+            .config
+            .devices
+            .get(&key)
+            .and_then(|device| device.per_app_settings.get("com.apple.Safari"))
+            .and_then(|settings| settings.dpi)
+    };
+    assert_eq!(
+        state.current_app_device_dpi().map(|(_, own)| own),
+        Some(false)
+    );
+
+    let _ = state.commit_app_device_dpi(&key, "com.apple.Safari", Some(Dpi::new(1600)));
+    assert_eq!(stored(&state), Some(Dpi::new(1600)));
+    assert_eq!(state.current_app_device_dpi(), Some((Dpi::new(1600), true)));
+
+    let _ = state.commit_app_device_dpi(&key, "com.apple.Safari", None);
+    assert_eq!(stored(&state), None);
+    assert!(
+        state.config.devices[&key].per_app_settings.is_empty(),
+        "a default entry is removed"
+    );
+}

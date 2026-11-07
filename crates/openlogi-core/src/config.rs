@@ -51,10 +51,10 @@ pub use revision::ConfigRevision;
 pub use settings::LightSettings;
 pub use settings::{
     AppIcon, AppSettings, Appearance, AssetSourcePreference, CameraControls, CameraStreamMode,
-    DesktopSwitcherSize, DeviceViewMode, GlideShape, Lighting, MomentumParams, MomentumScrolling, MouseProfileTarget,
-    OnboardMemory, SMARTSHIFT_AUTO_DISENGAGE_DEFAULT, SMARTSHIFT_MIN_AUTO_DISENGAGE,
-    ScrollResolution, SmartShift, ThumbwheelSensitivity, UiScale, VerticalScrollSensitivity,
-    WheelEasing, WheelFeel, WheelMode,
+    DesktopSwitcherSize, DeviceViewMode, GlideShape, Lighting, MomentumParams, MomentumScrolling,
+    MouseProfileTarget, OnboardMemory, SMARTSHIFT_AUTO_DISENGAGE_DEFAULT,
+    SMARTSHIFT_MIN_AUTO_DISENGAGE, ScrollResolution, SmartShift, ThumbwheelSensitivity, UiScale,
+    VerticalScrollSensitivity, WheelEasing, WheelFeel, WheelMode,
 };
 
 use crate::app::AppAliases;
