@@ -556,6 +556,36 @@ impl AppState {
         self.persist_and_reload("vertical scroll sensitivity");
         StateEvent::SettingsChanged.into()
     }
+
+    /// The main-wheel speed the open application profile uses, with whether
+    /// the profile sets its own. `None` outside an application profile.
+    #[must_use]
+    pub fn current_app_wheel_speed(&self) -> Option<(VerticalScrollSensitivity, bool)> {
+        let app = self.editing_app()?;
+        let speed = self.config.app_vertical_scroll_sensitivity(app);
+        let own = openlogi_core::app::overlay_for(
+            &self.config.app_wheel_speed,
+            &self.config.apps,
+            app,
+        )
+        .is_some();
+        Some((speed, own))
+    }
+
+    /// Sets (or, with `None`, clears) the main-wheel speed of the open
+    /// application profile.
+    pub fn commit_app_wheel_speed(
+        &mut self,
+        speed: Option<VerticalScrollSensitivity>,
+    ) -> StateEvents {
+        let Some(app) = self.editing_app().map(str::to_string) else {
+            return StateEvent::SettingsChanged.into();
+        };
+        self.config
+            .edit(|config| config.set_app_wheel_speed(&app, speed));
+        self.persist_and_reload("app wheel speed");
+        StateEvent::SettingsChanged.into()
+    }
     pub fn commit_auto_download_assets(&mut self, enabled: bool) -> StateEvents {
         if self.config.app_settings.auto_download_assets == enabled {
             return StateEvent::SettingsChanged.into();

@@ -17,6 +17,7 @@ use openlogi_core::binding::{
     Action, AppSwitcherParams, ButtonId, GamingLayout, GestureDirection, LongPressBinding,
     default_binding, default_binding_on,
 };
+use openlogi_core::config::VerticalScrollSensitivity;
 
 use super::app_switcher::AppSwitcherControls;
 use super::force_sensing::{PressForce, force_sensing_row};
@@ -53,6 +54,8 @@ pub(super) struct BindingInspectorData<'a> {
     pub wheel_hold: &'a BTreeSet<ButtonId>,
     pub editing_app: Option<&'a str>,
     pub overridden: Option<AppOverrides<'a>>,
+    /// The open application profile's main-wheel speed and whether it sets one.
+    pub app_wheel_speed: Option<(VerticalScrollSensitivity, bool)>,
     /// The haptic panel's press-force row, present only while
     /// [`ForceSensingFacts::current`](super::force_sensing::ForceSensingFacts::current)
     /// says it shows.
@@ -181,6 +184,7 @@ pub(super) fn binding_inspector(
         None => empty_inspector(
             data.editing_app,
             data.overridden.map_or(0, AppOverrides::len),
+            data.app_wheel_speed,
             pal,
         ),
         Some(MouseControlId::ThumbwheelRotation) => thumbwheel_inspector(
@@ -212,7 +216,12 @@ pub(super) fn binding_inspector(
         )
 }
 
-fn empty_inspector(app: Option<&str>, override_count: usize, pal: Palette) -> gpui::Div {
+fn empty_inspector(
+    app: Option<&str>,
+    override_count: usize,
+    app_wheel_speed: Option<(VerticalScrollSensitivity, bool)>,
+    pal: Palette,
+) -> gpui::Div {
     let summary = match (app, override_count) {
         (Some(app), 0) => tr!(
             "profiles.app_profile_no_overrides",
@@ -237,6 +246,76 @@ fn empty_inspector(app: Option<&str>, override_count: usize, pal: Palette) -> gp
             pal,
         ))
         .child(div().text_body().text_color(pal.text_muted).child(summary))
+        .when_some(app_wheel_speed, |panel, speed| {
+            panel.child(app_wheel_speed_block(speed, pal))
+        })
+}
+
+/// The open application profile's main-wheel speed: step buttons that write
+/// the profile's own speed, and a way back to the global speed once it has one.
+fn app_wheel_speed_block(
+    (speed, own): (VerticalScrollSensitivity, bool),
+    pal: Palette,
+) -> gpui::Div {
+    let value = u8::from(speed);
+    let (min, max) = (
+        i16::from(u8::from(VerticalScrollSensitivity::MIN)),
+        i16::from(u8::from(VerticalScrollSensitivity::MAX)),
+    );
+    let stepped = |delta: i16| {
+        let next = (i16::from(value) + delta).clamp(min, max);
+        u8::try_from(next)
+            .ok()
+            .and_then(|next| VerticalScrollSensitivity::try_from(next).ok())
+    };
+    let lower = stepped(-1);
+    let higher = stepped(1);
+    let status = if own {
+        tr!("pointer.app_wheel_speed_own")
+    } else {
+        tr!("pointer.app_wheel_speed_inherited")
+    };
+    let row = h_flex()
+        .gap_2()
+        .items_center()
+        .child(
+            Button::new("inspector-app-wheel-speed-down")
+                .small()
+                .label("−")
+                .disabled(lower.is_none())
+                .on_click(move |_, _, cx| {
+                    if let Some(next) = lower {
+                        AppState::apply(cx, |state| state.commit_app_wheel_speed(Some(next)));
+                    }
+                }),
+        )
+        .child(div().text_body().child(value.to_string()))
+        .child(
+            Button::new("inspector-app-wheel-speed-up")
+                .small()
+                .label("+")
+                .disabled(higher.is_none())
+                .on_click(move |_, _, cx| {
+                    if let Some(next) = higher {
+                        AppState::apply(cx, |state| state.commit_app_wheel_speed(Some(next)));
+                    }
+                }),
+        )
+        .when(own, |row| {
+            row.child(
+                Button::new("inspector-app-wheel-speed-global")
+                    .small()
+                    .label(tr!("pointer.app_wheel_speed_use_global"))
+                    .on_click(move |_, _, cx| {
+                        AppState::apply(cx, |state| state.commit_app_wheel_speed(None));
+                    }),
+            )
+        });
+    v_flex()
+        .gap_2()
+        .child(inspector_heading(tr!("pointer.app_wheel_speed_title"), None, pal))
+        .child(div().text_caption().text_color(pal.text_muted).child(status))
+        .child(row)
 }
 
 #[expect(
@@ -1249,6 +1328,7 @@ mod tests {
             wheel_hold,
             editing_app: None,
             overridden: None,
+            app_wheel_speed: None,
             press_force: None,
             long_presses: &NO_LONG_PRESSES,
             hold_editable: false,

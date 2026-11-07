@@ -111,6 +111,8 @@ struct MouseWorkspaceData<'a> {
     long_presses: &'a BTreeMap<ButtonId, LongPressBinding>,
     editing_app: Option<String>,
     overridden: Option<AppOverrides<'a>>,
+    /// The open application profile's main-wheel speed and whether it sets one.
+    app_wheel_speed: Option<(openlogi_core::config::VerticalScrollSensitivity, bool)>,
     /// Actions the picker offers beyond the catalog.
     extra_actions: &'static [Action],
     /// Catalog actions the picker leaves out.
@@ -152,6 +154,7 @@ impl<'a> MouseWorkspaceData<'a> {
                 state.editing_app().map(|app| profile_name(state, app))
             },
             overridden: state.editing_app_overrides(),
+            app_wheel_speed: state.current_app_wheel_speed(),
             extra_actions: held_actions(
                 state.current_gaming_layout().is_some()
                     && state.binding_layer() == BindingLayer::Normal,
@@ -187,6 +190,7 @@ impl<'a> MouseWorkspaceData<'a> {
             long_presses: &NO_LONG_PRESSES,
             editing_app: None,
             overridden: None,
+            app_wheel_speed: None,
             extra_actions: &[],
             hidden_actions: &[],
         }
@@ -600,6 +604,7 @@ impl Render for MouseModelView {
             long_presses,
             editing_app,
             overridden,
+            app_wheel_speed,
             extra_actions,
             hidden_actions,
         } = MouseWorkspaceData::read(cx).unwrap_or_else(MouseWorkspaceData::empty);
@@ -682,6 +687,7 @@ impl Render for MouseModelView {
                 wheel_hold,
                 editing_app: editing_app.as_deref(),
                 overridden,
+                app_wheel_speed,
                 press_force: PressForce::of(force_sensing.as_ref(), self.force_sensing.as_ref()),
                 extra_actions,
                 hidden_actions,
