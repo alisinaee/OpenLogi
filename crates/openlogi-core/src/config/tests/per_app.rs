@@ -462,3 +462,65 @@ fn a_long_press_without_hold_ms_keeps_the_default_threshold() {
     let press = LongPressBinding::new(Action::Copy, Action::Paste);
     assert_eq!(press.threshold(), crate::binding::LONG_PRESS_THRESHOLD);
 }
+
+#[test]
+fn an_app_device_setting_applies_only_to_that_app() {
+    use crate::config::device::AppDeviceSettings;
+    use crate::hid::Dpi;
+
+    let dpi = Dpi::try_from(1600_u16).expect("1600 is a valid DPI");
+    let mut cfg = Config::default();
+    cfg.devices
+        .entry("2b042".to_string())
+        .or_default()
+        .per_app_settings
+        .insert(
+            "com.microsoft.VSCode".to_string(),
+            AppDeviceSettings {
+                dpi: Some(dpi.clone()),
+                invert_scroll: Some(true),
+                ..AppDeviceSettings::default()
+            },
+        );
+
+    let vscode = cfg
+        .app_device_settings("2b042", "com.microsoft.VSCode")
+        .expect("VSCode has its own settings");
+    assert_eq!(vscode.dpi, Some(dpi));
+    assert_eq!(vscode.invert_scroll, Some(true));
+    assert_eq!(vscode.pointer_speed, None, "unset fields stay device-wide");
+    assert!(cfg.app_device_settings("2b042", "com.apple.Safari").is_none());
+    assert!(cfg.app_device_settings("other", "com.microsoft.VSCode").is_none());
+}
+
+#[test]
+fn an_app_wheel_speed_replaces_the_global_speed_for_that_app_only() {
+    use crate::config::settings::VerticalScrollSensitivity;
+
+    let mut cfg = Config::default();
+    let global = cfg.app_settings.vertical_scroll_sensitivity;
+    assert_ne!(VerticalScrollSensitivity::MAX, global, "precondition: MAX differs from the default");
+
+    cfg.set_app_wheel_speed("com.apple.Safari", Some(VerticalScrollSensitivity::MAX));
+    assert_eq!(
+        cfg.app_vertical_scroll_sensitivity("com.apple.Safari"),
+        VerticalScrollSensitivity::MAX
+    );
+    assert_eq!(cfg.app_vertical_scroll_sensitivity("com.microsoft.VSCode"), global);
+
+    cfg.set_app_wheel_speed("com.apple.Safari", None);
+    assert_eq!(cfg.app_vertical_scroll_sensitivity("com.apple.Safari"), global);
+}
+
+#[test]
+fn an_app_with_only_a_wheel_speed_is_listed_as_a_profile() {
+    use crate::config::settings::VerticalScrollSensitivity;
+
+    let mut cfg = Config::default();
+    cfg.set_app_wheel_speed("com.carriez.rustdesk", Some(VerticalScrollSensitivity::MIN));
+    cfg.set_per_app_binding("2b042", "com.apple.Safari", ButtonId::Back, Some(Action::Undo));
+
+    let listed: Vec<&str> = cfg.app_profiles("2b042").collect();
+    assert_eq!(listed, ["com.apple.Safari", "com.carriez.rustdesk"]);
+    assert_eq!(cfg.app_profiles("absent").collect::<Vec<_>>(), ["com.carriez.rustdesk"]);
+}

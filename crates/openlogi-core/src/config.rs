@@ -178,6 +178,12 @@ pub struct Config {
     /// rejects an `app:` profile key that names no alias here.
     #[serde(default, skip_serializing_if = "AppAliases::is_empty")]
     pub apps: AppAliases,
+    /// Per-application main-wheel speed: the vertical scroll sensitivity an
+    /// application uses instead of
+    /// [`AppSettings::vertical_scroll_sensitivity`]. Keyed like the per-app
+    /// profiles and resolved by [`Config::app_vertical_scroll_sensitivity`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub app_wheel_speed: BTreeMap<String, settings::VerticalScrollSensitivity>,
 }
 
 impl Default for Config {
@@ -191,6 +197,7 @@ impl Default for Config {
             ephemeral: false,
             keyboard: KeyboardConfig::default(),
             apps: AppAliases::default(),
+            app_wheel_speed: BTreeMap::new(),
         }
     }
 }

@@ -180,6 +180,28 @@ impl LinkOverrides {
     }
 }
 
+/// Mouse settings one application overrides for one device. Each `None` leaves
+/// the device-wide value in place, so an app only stores what it changes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AppDeviceSettings {
+    /// Sensor DPI while this application is in front.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_dpi",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dpi: Option<Dpi>,
+    /// SmartShift wheel mode while this application is in front.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smartshift: Option<SmartShift>,
+    /// Wheel inversion while this application is in front.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert_scroll: Option<bool>,
+    /// Pointer speed while this application is in front.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pointer_speed: Option<PointerSpeed>,
+}
+
 /// Settings scoped to a single physical device.
 ///
 /// Deserialization goes through `RawDeviceConfig` (`#[serde(from)]`) so
@@ -248,6 +270,10 @@ pub struct DeviceConfig {
     /// per-direction gesture overlay.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_app_bindings: BTreeMap<String, BTreeMap<ButtonId, PerAppBinding>>,
+    /// Per-application mouse-setting overrides, keyed like
+    /// [`Self::per_app_bindings`]. Resolved by [`Config::app_device_settings`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub per_app_settings: BTreeMap<String, AppDeviceSettings>,
     /// Host-rendered Actions Ring settings and complete per-application layouts.
     #[serde(default, skip_serializing_if = "ActionRingConfig::is_default")]
     pub action_ring: ActionRingConfig,
@@ -477,6 +503,7 @@ impl Default for DeviceConfig {
             bindings: BTreeMap::new(),
             disabled_gestures: BTreeMap::new(),
             per_app_bindings: BTreeMap::new(),
+            per_app_settings: BTreeMap::new(),
             action_ring: ActionRingConfig::default(),
             dpi_presets: Vec::new(),
             dpi: None,
@@ -605,6 +632,8 @@ struct RawDeviceConfig {
     #[serde(default, deserialize_with = "deserialize_button_maps_by_app")]
     per_app_bindings: BTreeMap<String, BTreeMap<ButtonId, PerAppBinding>>,
     #[serde(default)]
+    per_app_settings: BTreeMap<String, AppDeviceSettings>,
+    #[serde(default)]
     action_ring: ActionRingConfig,
     #[serde(default, deserialize_with = "deserialize_dpi_presets")]
     dpi_presets: Vec<Dpi>,
@@ -698,6 +727,7 @@ impl From<RawDeviceConfig> for DeviceConfig {
             bindings,
             disabled_gestures: raw.disabled_gestures,
             per_app_bindings: raw.per_app_bindings,
+            per_app_settings: raw.per_app_settings,
             action_ring: raw.action_ring,
             dpi_presets: raw.dpi_presets,
             dpi: raw.dpi,

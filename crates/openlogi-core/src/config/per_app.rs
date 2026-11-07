@@ -7,13 +7,50 @@
 //! `exe:<filename>` key, and then to the `app:<alias>` key of the
 //! [`Config::apps`] alias that lists the application.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::Config;
+use super::device::AppDeviceSettings;
 use crate::app::{overlay_for, profile_key_for};
 use crate::binding::{Action, Binding, ButtonId, PerAppBinding};
 
 impl Config {
+    /// The mouse-setting overrides `device_key` stores for the application in
+    /// front, matched as [`Self::effective_bindings`] matches it. `None` when
+    /// no application entry matches, so the device-wide values apply.
+    #[must_use]
+    pub fn app_device_settings(&self, device_key: &str, app: &str) -> Option<&AppDeviceSettings> {
+        let device = self.devices.get(device_key)?;
+        overlay_for(&device.per_app_settings, &self.apps, app)
+    }
+
+    /// The main-wheel vertical scroll sensitivity while `app` is in front: its
+    /// own [`Self::app_wheel_speed`] entry when it has one, else the global
+    /// [`AppSettings::vertical_scroll_sensitivity`](super::AppSettings::vertical_scroll_sensitivity).
+    #[must_use]
+    pub fn app_vertical_scroll_sensitivity(&self, app: &str) -> super::settings::VerticalScrollSensitivity {
+        overlay_for(&self.app_wheel_speed, &self.apps, app)
+            .copied()
+            .unwrap_or(self.app_settings.vertical_scroll_sensitivity)
+    }
+
+    /// Records (or, with `speed = None`, clears) the main-wheel speed `app`
+    /// uses in place of the global one.
+    pub fn set_app_wheel_speed(
+        &mut self,
+        app: &str,
+        speed: Option<super::settings::VerticalScrollSensitivity>,
+    ) {
+        match speed {
+            Some(speed) => {
+                self.app_wheel_speed.insert(app.to_string(), speed);
+            }
+            None => {
+                self.app_wheel_speed.remove(app);
+            }
+        }
+    }
+
     /// Resolve the effective binding map for `device_key`, overlaying the
     /// per-app entry for `bundle_id` (if any) on top of the global per-device
     /// `bindings`. A per-app override replaces the whole button with a
@@ -94,12 +131,18 @@ impl Config {
             .filter(|overrides| !overrides.is_empty())
     }
 
-    /// Every application key `device_key` has a profile for, in key order.
+    /// Every application key `device_key` has a profile for, in key order: the
+    /// apps with button overrides on this device, and the apps with a
+    /// main-wheel speed of their own (which apply to every device).
     pub fn app_profiles(&self, device_key: &str) -> impl Iterator<Item = &str> {
-        self.devices
+        let mut apps: BTreeSet<&str> = self
+            .devices
             .get(device_key)
             .into_iter()
             .flat_map(|device| device.per_app_bindings.keys().map(String::as_str))
+            .collect();
+        apps.extend(self.app_wheel_speed.keys().map(String::as_str));
+        apps.into_iter()
     }
 
     /// Drop `device_key`'s whole profile for `app`. Nothing happens when there
