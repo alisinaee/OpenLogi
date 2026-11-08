@@ -444,7 +444,20 @@ fn open_windows(cx: &App) -> Vec<WindowHandle<SwitcherView>> {
         .collect()
 }
 
-/// Show `shown`, or close the switcher when it is `None`.
+/// Hide a switcher window so the next switch can show it again, or close it
+/// where the platform cannot hide a window.
+fn park_or_close(cx: &mut App, view: &WindowHandle<SwitcherView>) {
+    let parked = view
+        .update(cx, |_, window, _| {
+            crate::platform::set_window_visible(window, false)
+        })
+        .unwrap_or(false);
+    if !parked {
+        let _ = view.update(cx, |_, window, _| window.remove_window());
+    }
+}
+
+/// Show `shown`, or hide the switcher when it is `None`.
 ///
 /// A switch that leaves the number of desktops as it was updates the open
 /// window in place; otherwise the window is replaced.
@@ -452,30 +465,47 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
     let open = open_windows(cx);
     let Some(switcher) = shown else {
         for view in open {
-            let _ = view.update(cx, |_, window, _| window.remove_window());
+            park_or_close(cx, &view);
         }
         return;
     };
     let here = crate::platform::cursor_display(cx);
+    tracing::info!(
+        count = switcher.count,
+        current = switcher.current,
+        cursor_display = ?here,
+        open_windows = open.len(),
+        "desktop switcher: present"
+    );
     let mut reused = false;
     for view in open {
         // A window stays on the display it opened on, so a switch made on
         // another display needs a window there.
-        let same_row = view.read(cx).is_ok_and(|view| {
-            shape(&view.switcher) == shape(&switcher)
-                && view.switcher.size == switcher.size
-                && view.display == here
-        });
+        let (window_display, same_row) = match view.read(cx) {
+            Ok(view) => (
+                Some(view.display),
+                shape(&view.switcher) == shape(&switcher)
+                    && view.switcher.size == switcher.size
+                    && view.display == here,
+            ),
+            Err(_) => (None, false),
+        };
+        tracing::info!(
+            window_display = ?window_display,
+            reused = same_row && !reused,
+            "desktop switcher: existing window"
+        );
         if same_row && !reused {
             let next = switcher.clone();
             reused = view
-                .update(cx, |view, _, cx| {
+                .update(cx, |view, window, cx| {
                     view.switcher = next;
                     cx.notify();
+                    crate::platform::set_window_visible(window, true);
                 })
                 .is_ok();
         } else {
-            let _ = view.update(cx, |_, window, _| window.remove_window());
+            park_or_close(cx, &view);
         }
     }
     if reused {
@@ -511,7 +541,17 @@ pub(crate) fn present(cx: &mut App, shown: Option<Switcher>) {
     };
     let placed = handle
         .update(cx, |_, window, cx| {
-            placement.show(window).map(|()| window.bounds_changed(cx))
+            // macOS: the window is already a PopUp that joins every Space, so
+            // there is nothing to restyle here (restyling inside this update is
+            // what re-entered GPUI).
+            #[cfg(target_os = "windows")]
+            let shown = placement.show(window).map(|()| window.bounds_changed(cx));
+            #[cfg(not(target_os = "windows"))]
+            let shown = {
+                window.bounds_changed(cx);
+                Ok(())
+            };
+            shown
         })
         .and_then(std::convert::identity);
     if let Err(error) = placed {

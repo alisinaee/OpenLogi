@@ -422,3 +422,42 @@ mod tests {
         assert!(layer_shell_refused());
     }
 }
+
+/// Order a window's native `NSWindow` out (`visible = false`) or back in, so a
+/// window can stay alive between switches instead of being closed and rebuilt.
+/// Returns whether the window was reached; other platforms return `false`, and
+/// their callers close the window instead.
+#[cfg(target_os = "macos")]
+#[expect(
+    unsafe_code,
+    reason = "GPUI exposes no hide/show for a window; the NSView it hands out is the window's own"
+)]
+pub(crate) fn set_window_visible(window: &gpui::Window, visible: bool) -> bool {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    // GPUI's inherent `window_handle` returns its own handle type, so the trait is named.
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return false;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return false;
+    };
+    // SAFETY: GPUI keeps this NSView alive for as long as the window exists, and
+    // the overlay only calls this from its main-thread App update.
+    let view: &objc2_app_kit::NSView = unsafe { appkit.ns_view.cast().as_ref() };
+    let Some(ns_window) = view.window() else {
+        return false;
+    };
+    if visible {
+        ns_window.orderFront(None);
+    } else {
+        ns_window.orderOut(None);
+    }
+    true
+}
+
+/// Other platforms have no hide that keeps the window, so this never parks.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn set_window_visible(_window: &gpui::Window, _visible: bool) -> bool {
+    false
+}
