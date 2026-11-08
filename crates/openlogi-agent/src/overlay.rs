@@ -37,9 +37,14 @@ pub fn spawn() {
         .name("openlogi-overlay-supervisor".into())
         .spawn(move || {
             let mut spawn = move || {
-                Command::new(&binary)
-                    .env(RUN_ENV, mine.get().to_string())
-                    .spawn()
+                let mut command = Command::new(&binary);
+                command.env(RUN_ENV, mine.get().to_string());
+                // The helper runs detached from any terminal, so its tracing
+                // output would otherwise be discarded; keep it in the state dir.
+                if let Some(log) = overlay_log() {
+                    command.stderr(log);
+                }
+                command.spawn()
             };
             // The anonymous verdict repeats every poll for as long as the
             // tenant lives, and answering it walks the process table. Answer
@@ -59,6 +64,18 @@ pub fn spawn() {
     if let Err(error) = result {
         warn!(%error, "could not start the Actions Ring overlay supervisor");
     }
+}
+
+/// Append-mode handle to the helper's log file in the state directory, or
+/// `None` when it cannot be opened.
+fn overlay_log() -> Option<std::fs::File> {
+    let directory = openlogi_core::paths::state_dir().ok()?;
+    std::fs::create_dir_all(&directory).ok()?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(directory.join("overlay.log"))
+        .ok()
 }
 
 /// Ask the overlay to leave, on the way out of a deliberate agent shutdown.
