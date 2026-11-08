@@ -80,8 +80,6 @@ pub(super) fn selected_easing_index(
 pub(super) fn general_page(
     controls: ScrollControls,
     momentum: Entity<MomentumPanel>,
-    pinned_apps: Entity<super::pinned_apps::PinnedAppsPanel>,
-    app_switcher_rows: Entity<super::app_switcher_rows::AppSwitcherRowsPanel>,
     registration_status: ServiceStatus,
 ) -> SettingPage {
     let ScrollControls {
@@ -182,30 +180,11 @@ pub(super) fn general_page(
         .title(tr!("pointer.momentum_title"))
         .description(tr!("pointer.momentum_general_description"))
         .item(SettingItem::render(move |_, _, _| momentum.clone()));
-    let page = SettingPage::new(tr!("app.general"))
+    SettingPage::new(tr!("app.general"))
         .icon(IconName::Settings)
         .resettable(false)
         .group(group)
-        .group(momentum_group);
-    // The app switcher is a macOS feature, so only macOS lists its pins.
-    if cfg!(target_os = "macos") {
-        page.group(
-            SettingGroup::new()
-                .title(tr!("app.pinned_apps"))
-                .description(tr!("app.pinned_apps_description"))
-                .item(SettingItem::render(move |_, _, _| pinned_apps.clone())),
-        )
-        .group(
-            SettingGroup::new()
-                .title(tr!("app.switcher_rows"))
-                .description(tr!("app.switcher_rows_description"))
-                .item(SettingItem::render(move |_, _, _| {
-                    app_switcher_rows.clone()
-                })),
-        )
-    } else {
-        page
-    }
+        .group(momentum_group)
 }
 
 fn mouse_profile_target_item() -> SettingItem {

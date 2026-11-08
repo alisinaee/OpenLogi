@@ -15,7 +15,7 @@ use crate::ui::theme::{Palette, Typography as _};
 
 /// The overlay that Previous and Next Desktop show: whether it is shown, its
 /// apps, whether the desktop switch animates, and its size.
-pub(super) fn desktop_switcher_panel(pal: Palette, cx: &App) -> impl IntoElement {
+pub(crate) fn desktop_switcher_panel(pal: Palette, cx: &App) -> impl IntoElement {
     let app: AppSettings = AppState::try_read(cx)
         .map(|state| state.app_settings().clone())
         .unwrap_or_default();
@@ -23,7 +23,7 @@ pub(super) fn desktop_switcher_panel(pal: Palette, cx: &App) -> impl IntoElement
         .iter()
         .position(|choice| *choice == app.desktop_switcher_size)
         .unwrap_or_default();
-    let sizes = RadioGroup::vertical("mouse-desktop-switcher-size")
+    let sizes = RadioGroup::horizontal("mouse-desktop-switcher-size")
         .child(
             Radio::new("mouse-desktop-switcher-size-small")
                 .label(tr!("app.desktop_switcher_size_small")),

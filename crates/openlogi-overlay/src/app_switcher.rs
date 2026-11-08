@@ -216,6 +216,7 @@ impl Render for Panel {
                 div()
                     .flex()
                     .flex_col()
+                    .items_center()
                     .gap(px(4.0))
                     .child(
                         div()
@@ -224,7 +225,7 @@ impl Render for Panel {
                             .text_color(LABEL)
                             .child(row_label(row)),
                     )
-                    .child(div().flex().flex_row().gap(px(TILE_GAP)).children(tiles))
+                    .child(div().flex().flex_row().justify_center().gap(px(TILE_GAP)).children(tiles))
             })
             .collect::<Vec<_>>();
         div()
@@ -237,6 +238,7 @@ impl Render for Panel {
                     .flex()
                     .flex_col()
                     .gap(px(ROW_GAP))
+                    .items_center()
                     .p(px(CARD_PAD))
                     .rounded(px(14.0))
                     .bg(CARD)

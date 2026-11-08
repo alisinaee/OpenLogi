@@ -5,8 +5,8 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Task, Window, div,
+    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{InputEvent, InputState};
@@ -24,7 +24,7 @@ const MAX_SUGGESTIONS: usize = 6;
 /// One list the user edits: a row's allow or block list, or the list no row
 /// shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum List {
+pub(crate) enum List {
     /// The row shows only these apps, when the list is not empty.
     Allow(SwitcherRow),
     /// The row never shows these apps.
@@ -129,7 +129,41 @@ fn list_names(list: List) -> (SharedString, SharedString) {
     }
 }
 
-pub(super) struct AppSwitcherRowsPanel {
+/// `rules` with `id` moved from `from` to `to`, keeping the order of the other
+/// entries. Dropping an app onto the list it came from changes nothing.
+fn moved_between(rules: &SwitcherRowRules, from: List, to: List, id: &str) -> SwitcherRowRules {
+    if from == to {
+        return rules.clone();
+    }
+    let mut next = rules.clone();
+    list_mut(&mut next, from).retain(|existing| existing != id);
+    let target = list_mut(&mut next, to);
+    if !target.iter().any(|existing| existing == id) {
+        target.push(id.to_owned());
+    }
+    next
+}
+
+/// What an app chip carries while it is dragged: the list it came from.
+#[derive(Clone)]
+struct DraggedApp {
+    from: List,
+    id: String,
+    name: SharedString,
+}
+
+impl Render for DraggedApp {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(theme::accent_tint())
+            .child(self.name.clone())
+    }
+}
+
+pub(crate) struct AppSwitcherRowsPanel {
     search: Entity<InputState>,
     installed: Vec<Installed>,
     /// The list new apps are being added to, when the picker is open.
@@ -140,7 +174,7 @@ pub(super) struct AppSwitcherRowsPanel {
 }
 
 impl AppSwitcherRowsPanel {
-    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx));
         let search_obs = cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
@@ -183,21 +217,31 @@ impl AppSwitcherRowsPanel {
         name_of: &dyn Fn(&str) -> SharedString,
     ) -> impl IntoElement + use<> {
         let items = list_of(rules, list).to_vec();
-        let chips: Vec<Button> = items
+        let chips = items
             .iter()
             .enumerate()
             .map(|(index, id)| {
                 let next = without(rules, list, index);
-                Button::new(format!("rule-remove-{list:?}-{index}"))
-                    .ghost()
-                    .small()
-                    .icon(IconName::Close)
-                    .label(name_of(id))
-                    .on_click(move |_, _, cx| {
-                        AppState::apply(cx, |state| state.commit_app_switcher_rules(next.clone()));
-                    })
+                let dragged = DraggedApp {
+                    from: list,
+                    id: id.clone(),
+                    name: name_of(id),
+                };
+                div()
+                    .id(format!("rule-chip-{list:?}-{index}"))
+                    .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                    .child(
+                        Button::new(format!("rule-remove-{list:?}-{index}"))
+                            .ghost()
+                            .small()
+                            .icon(IconName::Close)
+                            .label(name_of(id))
+                            .on_click(move |_, _, cx| {
+                                AppState::apply(cx, |state| state.commit_app_switcher_rules(next.clone()));
+                            }),
+                    )
             })
-            .collect();
+            .collect::<Vec<_>>();
         let (title, _) = list_names(list);
         let body = if items.is_empty() {
             div()
@@ -214,6 +258,15 @@ impl AppSwitcherRowsPanel {
         };
         v_flex()
             .gap_1()
+            .id(format!("rule-list-{list:?}"))
+            .drag_over::<DraggedApp>(|style, _, _, _| style.bg(theme::accent_tint()))
+            .on_drop({
+                let base = rules.clone();
+                move |dragged: &DraggedApp, _, cx| {
+                    let next = moved_between(&base, dragged.from, list, &dragged.id);
+                    AppState::apply(cx, |state| state.commit_app_switcher_rules(next));
+                }
+            })
             .child(
                 h_flex()
                     .gap_2()
@@ -371,7 +424,21 @@ impl Render for AppSwitcherRowsPanel {
 mod tests {
     use openlogi_core::switcher_rows::{SwitcherRow, SwitcherRowRules};
 
-    use super::{List, list_of, with_added, with_enabled, without};
+    use super::{List, list_of, moved_between, with_added, with_enabled, without};
+
+    #[test]
+    fn dragging_moves_app_between_lists_once() {
+        let rules = with_added(
+            &SwitcherRowRules::default(),
+            List::Allow(SwitcherRow::Recent),
+            "a",
+        );
+        let moved = moved_between(&rules, List::Allow(SwitcherRow::Recent), List::Never, "a");
+        assert!(list_of(&moved, List::Allow(SwitcherRow::Recent)).is_empty());
+        assert_eq!(list_of(&moved, List::Never), ["a"]);
+        let dropped_again = moved_between(&moved, List::Never, List::Never, "a");
+        assert_eq!(dropped_again, moved);
+    }
 
     #[test]
     fn adding_appends_once() {

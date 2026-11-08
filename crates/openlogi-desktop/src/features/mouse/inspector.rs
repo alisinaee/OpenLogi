@@ -59,7 +59,7 @@ pub(super) struct BindingInspectorData<'a> {
     pub app_wheel_speed: Option<(VerticalScrollSensitivity, bool)>,
     /// The open application profile's DPI on this device and whether it sets one.
     pub app_dpi: Option<(Dpi, bool)>,
-    /// The haptic panel's press-force row, present only while
+    /// The haptic 's press-force row, present only while
     /// [`ForceSensingFacts::current`](super::force_sensing::ForceSensingFacts::current)
     /// says it shows.
     pub press_force: Option<PressForce<'a>>,

@@ -95,23 +95,38 @@ fn contributed_corpus_projects_identity_battery_capabilities_and_detail_tabs() {
     }
 }
 
+/// Mouse tabs gain the Switcher tab (before Pointer) on macOS only, where the
+/// app switcher and desktop switcher exist.
+fn with_switcher(mut tabs: Vec<DetailTab>) -> Vec<DetailTab> {
+    if cfg!(target_os = "macos") {
+        let at = tabs.iter().position(|tab| *tab == DetailTab::Pointer).unwrap_or(tabs.len());
+        tabs.insert(at, DetailTab::Switcher);
+    }
+    tabs
+}
+
 /// The detail tabs reviewed for each contributed profile's devices.
 fn reviewed_detail_tabs(id: &str) -> Vec<DetailTab> {
     match id {
         // The MX Ergo has no DPI or wheel feature. Its Pointer tab carries
         // the software scroll inversion, which Windows does not have.
-        "mx-ergo-001" if openlogi_hook::SOFTWARE_SCROLL_INVERSION => vec![
+        "mx-ergo-001" if openlogi_hook::SOFTWARE_SCROLL_INVERSION => with_switcher(vec![
             DetailTab::Buttons,
             DetailTab::ActionsRing,
             DetailTab::Pointer,
             DetailTab::Device,
-        ],
-        "mx-ergo-001" => vec![
+        ]),
+        "mx-ergo-001" => with_switcher(vec![
             DetailTab::Buttons,
             DetailTab::ActionsRing,
             DetailTab::Device,
-        ],
-        "mx-master-4-001" | "mx-master-3s-001" | "mx-master-3-001" | "mx-anywhere-3s-001" => vec![
+        ]),
+        "mx-master-4-001" | "mx-master-3s-001" | "mx-master-3-001" | "mx-anywhere-3s-001" => with_switcher(vec![
+            DetailTab::Buttons,
+            DetailTab::ActionsRing,
+            DetailTab::Pointer,
+            DetailTab::Device,
+        ]),| "mx-master-3s-001" | "mx-master-3-001" | "mx-anywhere-3s-001" => vec![
             DetailTab::Buttons,
             DetailTab::ActionsRing,
             DetailTab::Pointer,

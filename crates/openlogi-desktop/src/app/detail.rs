@@ -29,6 +29,8 @@ use crate::features::camera::preview::CameraPreview;
 use crate::features::keyboard::disable_keys::DisableKeysPanel;
 use crate::features::keyboard::function_row::FunctionRowView;
 use crate::features::lighting::keyboard_rgb::LightingPanel;
+use crate::windows::settings::app_switcher_rows::AppSwitcherRowsPanel;
+use crate::windows::settings::pinned_apps::PinnedAppsPanel;
 use crate::features::lighting::standalone::LightPanel;
 use crate::features::lighting::visual as light_visual;
 use crate::features::mouse::view::MouseModelView;
@@ -102,6 +104,8 @@ pub(super) struct DetailPanels<'a> {
     pub keyboard_model: &'a gpui::Entity<FunctionRowView>,
     pub disable_keys_panel: &'a gpui::Entity<DisableKeysPanel>,
     pub dpi_panel: &'a gpui::Entity<DpiPanel>,
+    pub pinned_apps_panel: &'a gpui::Entity<PinnedAppsPanel>,
+    pub app_switcher_rows: &'a gpui::Entity<AppSwitcherRowsPanel>,
     pub smartshift_panel: &'a gpui::Entity<SmartShiftPanel>,
     pub momentum_panel: &'a gpui::Entity<MomentumPanel>,
     pub lighting_panel: &'a gpui::Entity<LightingPanel>,
@@ -135,6 +139,9 @@ pub(super) fn detail_content(
         }
         DetailTab::Keys => {
             keys_tab(panels.keyboard_model, profile_icons, app_catalog, cx).into_any_element()
+        }
+        DetailTab::Switcher => {
+            switcher_tab(panels.pinned_apps_panel, panels.app_switcher_rows, cx).into_any_element()
         }
         DetailTab::Pointer => pointer_tab(
             panels.dpi_panel,
@@ -257,6 +264,7 @@ fn detail_tab_icon(tab: DetailTab) -> &'static str {
     match tab {
         DetailTab::Buttons => "action-icons/mouse-pointer-click.svg",
         DetailTab::ActionsRing => "action-icons/layout-grid.svg",
+        DetailTab::Switcher => "action-icons/layers.svg",
         DetailTab::Keys => "action-icons/keyboard.svg",
         DetailTab::Pointer => "action-icons/gauge.svg",
         DetailTab::Lighting | DetailTab::Light => "action-icons/palette.svg",
@@ -877,6 +885,52 @@ fn camera_tab(
                     )),
             ),
     )
+}
+
+/// Switcher tab: the app switcher the DPI button opens (pinned apps, each row's
+/// lists) and the desktop switcher the thumb wheel's desktop presets show. These
+/// are app-wide settings, so the tab lists them on every mouse.
+fn switcher_tab(
+    pinned_apps: &gpui::Entity<PinnedAppsPanel>,
+    app_switcher_rows: &gpui::Entity<AppSwitcherRowsPanel>,
+    cx: &mut Context<AppView>,
+) -> impl IntoElement {
+    let pal = theme::palette(cx);
+    tab_body(
+        DetailTab::Switcher,
+        ContentWidth::Large,
+        v_flex()
+            .gap_8()
+            .w_full()
+            .child(switcher_section(
+                tr!("app.pinned_apps"),
+                tr!("app.pinned_apps_description"),
+                pinned_apps.clone(),
+                pal,
+            ))
+            .child(switcher_section(
+                tr!("app.switcher_rows"),
+                tr!("app.switcher_rows_description"),
+                app_switcher_rows.clone(),
+                pal,
+            ))
+            .child(crate::features::mouse::desktop_switcher::desktop_switcher_panel(pal, cx)),
+    )
+}
+
+/// One titled block of the Switcher tab.
+fn switcher_section(
+    title: SharedString,
+    description: SharedString,
+    body: impl IntoElement,
+    pal: theme::Palette,
+) -> impl IntoElement {
+    v_flex()
+        .gap_2()
+        .w_full()
+        .child(div().text_body().text_color(pal.text_primary).child(title))
+        .child(div().text_caption().text_color(pal.text_muted).child(description))
+        .child(body)
 }
 
 /// Standalone-light controls in a separate panel from HID++ keyboard RGB.

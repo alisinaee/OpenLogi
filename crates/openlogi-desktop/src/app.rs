@@ -1,4 +1,6 @@
 use crate::ui::theme::FocusRingStyle as _;
+use crate::windows::settings::app_switcher_rows::AppSwitcherRowsPanel;
+use crate::windows::settings::pinned_apps::PinnedAppsPanel;
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     MouseButton, NavigationDirection, ParentElement, Render, Styled, Subscription, Window, div,
@@ -78,6 +80,8 @@ enum DetailTab {
     Buttons,
     /// Cursor-centred eight-slot action launcher.
     ActionsRing,
+    /// The app switcher the DPI button opens, and the desktop switcher.
+    Switcher,
     /// The keyboard function-row remapper with clickable F-key bubbles.
     Keys,
     /// Pointer tuning — DPI and presets.
@@ -171,6 +175,11 @@ impl DetailTab {
         if caps.haptic_panel || (buttons && can_show_mouse_model && !gaming) || shows_keys_tab {
             tabs.push(Self::ActionsRing);
         }
+        // The app switcher the DPI button opens and the desktop switcher are
+        // macOS features. The mouse page holds their settings.
+        if cfg!(target_os = "macos") && buttons && can_show_mouse_model {
+            tabs.push(Self::Switcher);
+        }
         let has_software_scroll = openlogi_hook::SOFTWARE_SCROLL_INVERSION
             && record.capabilities.is_some()
             && matches!(record.kind, DeviceKind::Mouse | DeviceKind::Trackball);
@@ -207,6 +216,7 @@ impl DetailTab {
         match self {
             Self::Buttons => tr!("device.buttons"),
             Self::ActionsRing => tr!("action_ring.actions_ring"),
+            Self::Switcher => tr!("device.switcher"),
             Self::Keys => tr!("device.keys"),
             Self::Pointer => tr!("device.pointer"),
             Self::Lighting | Self::Light => tr!("device.lighting"),
@@ -226,6 +236,8 @@ pub struct AppView {
     keyboard_model: Entity<FunctionRowView>,
     disable_keys_panel: Entity<DisableKeysPanel>,
     dpi_panel: Entity<DpiPanel>,
+    pinned_apps_panel: Entity<PinnedAppsPanel>,
+    app_switcher_rows_panel: Entity<AppSwitcherRowsPanel>,
     smartshift_panel: Entity<SmartShiftPanel>,
     momentum_panel: Entity<MomentumPanel>,
     lighting_panel: Entity<LightingPanel>,
@@ -311,6 +323,8 @@ impl AppView {
         let keyboard_model = cx.new(FunctionRowView::new);
         let disable_keys_panel = cx.new(DisableKeysPanel::new);
         let dpi_panel = cx.new(DpiPanel::new);
+        let pinned_apps_panel = cx.new(|cx| PinnedAppsPanel::new(window, cx));
+        let app_switcher_rows_panel = cx.new(|cx| AppSwitcherRowsPanel::new(window, cx));
         let smartshift_panel = cx.new(SmartShiftPanel::new);
         let momentum_panel = cx.new(|cx| MomentumPanel::new(MomentumScope::SelectedDevice, cx));
         let lighting_panel = cx.new(LightingPanel::new);
@@ -335,6 +349,8 @@ impl AppView {
             keyboard_model,
             disable_keys_panel,
             dpi_panel,
+            pinned_apps_panel,
+            app_switcher_rows_panel,
             smartshift_panel,
             momentum_panel,
             lighting_panel,
@@ -738,6 +754,8 @@ impl AppView {
                         keyboard_model: &self.keyboard_model,
                         disable_keys_panel: &self.disable_keys_panel,
                         dpi_panel: &self.dpi_panel,
+                        pinned_apps_panel: &self.pinned_apps_panel,
+                        app_switcher_rows: &self.app_switcher_rows_panel,
                         smartshift_panel: &self.smartshift_panel,
                         momentum_panel: &self.momentum_panel,
                         lighting_panel: &self.lighting_panel,

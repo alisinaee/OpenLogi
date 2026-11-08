@@ -24,14 +24,14 @@ const MAX_SUGGESTIONS: usize = 6;
 /// One installed application: display name and the identifier the switcher
 /// matches on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Installed {
-    pub(super) name: String,
-    pub(super) id: String,
+pub(crate) struct Installed {
+    pub(crate) name: String,
+    pub(crate) id: String,
 }
 
 /// The installed applications, listed on the background executor. Empty when
 /// the platform cannot list them (the failure is logged).
-pub(super) async fn discover_installed(cx: &gpui::AsyncApp) -> Vec<Installed> {
+pub(crate) async fn discover_installed(cx: &gpui::AsyncApp) -> Vec<Installed> {
     let found = cx
         .background_executor()
         .spawn(async { appcatalog::applications() })
@@ -45,7 +45,7 @@ pub(super) async fn discover_installed(cx: &gpui::AsyncApp) -> Vec<Installed> {
     }
 }
 
-pub(super) struct PinnedAppsPanel {
+pub(crate) struct PinnedAppsPanel {
     search: Entity<InputState>,
     installed: Vec<Installed>,
     _search_obs: Subscription,
@@ -54,7 +54,7 @@ pub(super) struct PinnedAppsPanel {
 }
 
 impl PinnedAppsPanel {
-    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx));
         let search_obs = cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
@@ -131,7 +131,7 @@ fn removed(pinned: &[String], index: usize) -> Vec<String> {
 
 /// The apps to offer for `query`: matches among the installed apps, or the
 /// recently used ones while the query is empty; never one already pinned.
-pub(super) fn suggestions(
+pub(crate) fn suggestions(
     query: &str,
     installed: &[Installed],
     recent: &[Installed],
