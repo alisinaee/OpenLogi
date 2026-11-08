@@ -105,6 +105,15 @@ fn report(display: u32, state: &SpaceState) {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(display, schema.clone());
     }
+    let space_display = display;
+    tracing::info!(
+        display_id = space_display,
+        count,
+        current,
+        schema = schema.is_some(),
+        ticket,
+        "desktop switcher: report"
+    );
     observer(DesktopPosition {
         count,
         current,
@@ -140,10 +149,19 @@ fn report_position(display: u32, count: u16, current: u16) {
         return;
     };
     REPORTS.fetch_add(1, Ordering::SeqCst);
+    let schema = cached_schema(display, count);
+    let space_display = display;
+    tracing::info!(
+        display_id = space_display,
+        count,
+        current,
+        schema = schema.is_some(),
+        "desktop switcher: predicted report"
+    );
     observer(DesktopPosition {
         count,
         current,
-        schema: cached_schema(display, count),
+        schema,
     });
 }
 
