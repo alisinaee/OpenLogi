@@ -102,7 +102,13 @@ impl NoticePlacement {
     /// at its bottom edge.
     pub(crate) fn capture_centred(cx: &mut gpui::App, size: Size<Pixels>) -> Self {
         let attempts = if on_wayland() {
-            wayland_notice_windows(size)
+            // A layer-shell surface is only for the bottom edge; a centred window
+            // is an ordinary one that the compositor places.
+            let bounds = Some(WindowBounds::Windowed(Bounds::new(Point::default(), size)));
+            vec![WindowOptions {
+                window_bounds: bounds,
+                ..notice_window_options()
+            }]
         } else {
             vec![positioned_notice_at(cx, size, centre)]
         };
