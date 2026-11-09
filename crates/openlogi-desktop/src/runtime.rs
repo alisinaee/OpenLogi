@@ -144,7 +144,13 @@ pub(crate) fn spawn(startup: Startup, cx: &mut gpui::App) {
         std::thread::spawn(assets::cleanup_legacy_glow_pngs);
 
         #[cfg(target_os = "macos")]
-        ensure_registration_at_startup(cx);
+        {
+            let launch_at_login = cx.update(|cx| {
+                AppState::try_global(cx)
+                    .is_some_and(|state| state.read(cx).app_settings().launch_at_login)
+            });
+            ensure_registration_at_startup(cx, launch_at_login);
+        }
 
         let (sync_tx, mut sync_done) = tokio::sync::mpsc::unbounded_channel::<()>();
         let mut rt = Runtime::new(cams, sync_tx, swr, resolver);
@@ -205,11 +211,13 @@ pub(crate) fn spawn(startup: Startup, cx: &mut gpui::App) {
 /// first wins; this one still covers the update re-register while the agent
 /// is alive. Preference-independent (see `platform::registration`), so there
 /// is no stale input to stage around. On the background executor (XPC must
-/// not delay first paint); skipped for dev profiles, whose registration
-/// stays an explicit toggle.
+/// not delay first paint). Dev profiles register only while `launch_at_login`
+/// is on: the toggle registers on a change only, so a dev build that already
+/// has the preference on would otherwise never reach launchd and never start
+/// at login.
 #[cfg(target_os = "macos")]
-fn ensure_registration_at_startup(cx: &mut gpui::AsyncApp) {
-    if openlogi_core::paths::is_dev_profile() {
+fn ensure_registration_at_startup(cx: &mut gpui::AsyncApp, launch_at_login: bool) {
+    if openlogi_core::paths::is_dev_profile() && !launch_at_login {
         return;
     }
     cx.background_executor()
